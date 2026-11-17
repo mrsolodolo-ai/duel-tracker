@@ -71,6 +71,16 @@ tr.best td { font-weight: 700; }
 .tip.hot { border-left-color: var(--loss); }
 .tip h3 { font-size: 15px; font-weight: 700; margin: 0; }
 .tip p { margin: 0; font-size: 14px; }
+table.race tr.me td { background: color-mix(in oklab, var(--accent) 14%, transparent); font-weight: 700; }
+table.race-opps tr.key td { background: color-mix(in oklab, var(--msl) 10%, transparent); }
+.racebar { display: flex; align-items: center; gap: 6px; min-width: 92px; }
+.racebar .bar { flex: 1; min-width: 36px; }
+.racebar .pct { font-variant-numeric: tabular-nums; min-width: 3.5ch; text-align: right; }
+.callout.key { border-left: 3px solid var(--msl); padding-left: 8px; }
+table.race-opps .linkbtn, table.race .linkbtn { text-align: left; }
+table.race-opps .tag { margin-top: 3px; display: inline-block; }
+table.race-opps td:first-child .meta, table.race td { white-space: nowrap; }
+table.race th .meta { text-transform: none; letter-spacing: 0; font-weight: 400; }
 .tip-list { margin: 4px 0 0; padding-left: 18px; font-size: 14px; display: flex; flex-direction: column; gap: 4px; }
 .tip-rows { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .tip-row { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; }
@@ -252,6 +262,7 @@ details[open] > summary { margin-bottom: 10px; }
   </header>
   <nav class="tabs" aria-label="Sections">
     <a href="#next" data-view="next">Next fight</a>
+    <a href="#race" data-view="race">Top 8</a>
     <a href="#insights" data-view="insights">Insights</a>
     <a href="#opponents" data-view="opponents">Opponents</a>
     <a href="#log" data-view="log">Battle log</a>
@@ -1019,10 +1030,223 @@ details[open] > summary { margin-bottom: 10px; }
 
 </script>
 <script>
+/* Champion Duel qualifiers: fight points and the race for the top 8.
+   Works in the browser (window.DuelRace) and in Node (module.exports). Needs the DuelEngine (E).
+   Points (checked on every day-1/2 fight): a loss scores 66 per enemy troop killed; a win scores
+   300,000 + 66 per enemy troop killed + 66 per own troop left. The first three encounters pair slot 1 v 1, 2 v 2, 3 v 3. */
+(function (root) {
+  'use strict';
+  var PER_TROOP = 66, WIN_BONUS = 300000;
+
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      var t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function gaussFrom(rnd) {
+    var spare = null;
+    return function () {
+      if (spare != null) { var s = spare; spare = null; return s; }
+      var u = rnd(); if (u < 1e-12) u = 1e-12;
+      var v = rnd(), r = Math.sqrt(-2 * Math.log(u));
+      spare = r * Math.sin(2 * Math.PI * v);
+      return r * Math.cos(2 * Math.PI * v);
+    };
+  }
+
+  // Full troops of each squad (by team id), from the encounters of a player's fights, newest fight first.
+  function troopsOf(entries) {
+    var out = {};
+    for (var i = entries.length - 1; i >= 0; i--) {
+      var e = entries[i];
+      if (!Array.isArray(e.enc) || !e.side) continue;
+      var a = e.side === 'a', seen = {};
+      for (var j = 0; j < e.enc.length; j++) {
+        var x = e.enc[j], id = String(a ? x[0] : x[1]), before = +(a ? x[3] : x[5]);
+        if (seen[id]) continue;
+        seen[id] = 1;
+        if (out[id] == null && before > 0) out[id] = before;
+      }
+    }
+    return out;
+  }
+  // Troops for a formation (slot order): known team ids, else the player's average squad, else a typical squad.
+  function troopsFor(form, tmap, fallback) {
+    var vals = Object.keys(tmap || {}).map(function (k) { return tmap[k]; });
+    var avg = vals.length ? vals.reduce(function (s, v) { return s + v; }, 0) / vals.length : (fallback || 3000);
+    return form.map(function (q) { return q.id != null && tmap && tmap[String(q.id)] ? tmap[String(q.id)] : avg; });
+  }
+
+  // One fight. A and B are squads in slot order; SA/SB their real strengths this time; trA/trB their troops.
+  // Returns [result for A (1 win, 0 loss, 0.5 both out), points A, points B].
+  function fightPts(SA, SB, trA, trB, tA, tB, bonus, k) {
+    var qa = [0, 1, 2], qb = [0, 1, 2], fa = [1, 1, 1], fb = [1, 1, 1], k2 = 2 * k;
+    while (qa.length && qb.length) {
+      var a = qa.shift(), b = qb.shift();
+      var ea = SA[a] * fa[a] * (E.BEATS[tA[a]] === tB[b] ? 1 + bonus : 1), eb = SB[b] * fb[b] * (E.BEATS[tB[b]] === tA[a] ? 1 + bonus : 1);
+      if (ea > eb) { fa[a] *= Math.pow(1 - Math.pow(eb / ea, k2), 1 / k2); fb[b] = 0; qa.push(a); }
+      else if (eb > ea) { fb[b] *= Math.pow(1 - Math.pow(ea / eb, k2), 1 / k2); fa[a] = 0; qb.push(b); }
+      else { fa[a] = 0; fb[b] = 0; }
+    }
+    var killA = 0, killB = 0, leftA = 0, leftB = 0;
+    for (var c = 0; c < 3; c++) { killA += (1 - fb[c]) * trB[c]; killB += (1 - fa[c]) * trA[c]; leftA += fa[c] * trA[c]; leftB += fb[c] * trB[c]; }
+    var res = qa.length ? 1 : (qb.length ? 0 : 0.5);
+    return [res, PER_TROOP * killA + (res === 1 ? WIN_BONUS + PER_TROOP * leftA : 0), PER_TROOP * killB + (res === 0 ? WIN_BONUS + PER_TROOP * leftB : 0)];
+  }
+
+  // Many fights of A (slot order) against B (slot order): win chance and points given each result.
+  function pairStats(A, B, trA, trB, opt) {
+    var n = opt.n || 200, rnd = mulberry32(opt.seed || 12345), g = gaussFrom(rnd), sig = opt.sigma, bonus = opt.bonus, k = opt.attr || 1.5;
+    var tA = A.map(function (q) { return q.t; }), tB = B.map(function (q) { return q.t; });
+    var SA = [0, 0, 0], SB = [0, 0, 0], w = 0, a1 = 0, b1 = 0, a0 = 0, b0 = 0, nl = 0;
+    for (var s = 0; s < n; s++) {
+      for (var c = 0; c < 3; c++) { SA[c] = A[c].p * Math.exp(sig * g()); SB[c] = B[c].p * Math.exp(sig * g()); }
+      var r = fightPts(SA, SB, trA, trB, tA, tB, bonus, k);
+      if (r[0] >= 0.5) { w += r[0]; a1 += r[1]; b1 += r[2]; } else { nl++; a0 += r[1]; b0 += r[2]; }
+    }
+    var nw = n - nl;
+    return { p: w / n, a1: nw ? a1 / nw : 0, b1: nw ? b1 / nw : 0, a0: nl ? a0 / nl : 0, b0: nl ? b0 / nl : 0 };
+  }
+
+  // A full match between two players who usually repeat their last order (78% of choices in the reports do):
+  // each plays it with chance KEEP and any other order otherwise. Close matchups only; lopsided ones keep the single-order result.
+  var KEEP = 0.78, PERM_ORDERS = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+  function matchStats(A, B, trA, trB, opt) {
+    var base = pairStats(A, B, trA, trB, Object.assign({}, opt, { n: opt.n || 120 }));
+    var pa = A.reduce(function (s, q) { return s + q.p; }, 0), pb = B.reduce(function (s, q) { return s + q.p; }, 0);
+    if (Math.max(pa, pb) / Math.min(pa, pb) > (opt.closeRatio || 1.25)) return base;
+    var hw = function (k) { return k === 0 ? KEEP : (1 - KEEP) / 5; }, P = 0, A1 = 0, B1 = 0, A0 = 0, B0 = 0, W1 = 0, W0 = 0;
+    for (var i = 0; i < 6; i++) for (var j = 0; j < 6; j++) {
+      var w = hw(i) * hw(j), st;
+      if (i === 0 && j === 0) st = base;
+      else {
+        var oi = PERM_ORDERS[i], oj = PERM_ORDERS[j];
+        st = pairStats(oi.map(function (c) { return A[c]; }), oj.map(function (c) { return B[c]; }), oi.map(function (c) { return trA[c]; }), oj.map(function (c) { return trB[c]; }),
+          Object.assign({}, opt, { n: opt.mixSims || 24, seed: (opt.seed || 1) + i * 6 + j }));
+      }
+      P += w * st.p; A1 += w * st.p * st.a1; B1 += w * st.p * st.b1; A0 += w * (1 - st.p) * st.a0; B0 += w * (1 - st.p) * st.b0; W1 += w * st.p; W0 += w * (1 - st.p);
+    }
+    return { p: P, a1: W1 ? A1 / W1 : base.a1, b1: W1 ? B1 / W1 : base.b1, a0: W0 ? A0 / W0 : base.a0, b0: W0 ? B0 / W0 : base.b0 };
+  }
+
+  // 6x6 for the Next fight call: your win chance and expected points for each of your orders (rows) vs theirs (cols).
+  function pointsMatrix(myCanon, theirCanon, trMine, trTheirs, opt) {
+    var W = [], PM = [], PT = [];
+    for (var i = 0; i < 6; i++) {
+      W.push([]); PM.push([]); PT.push([]);
+      var A = E.PERMS[i].map(function (c) { return myCanon[c]; }), ta = E.PERMS[i].map(function (c) { return trMine[c]; });
+      for (var j = 0; j < 6; j++) {
+        var B = E.PERMS[j].map(function (c) { return theirCanon[c]; }), tb = E.PERMS[j].map(function (c) { return trTheirs[c]; });
+        var st = pairStats(A, B, ta, tb, { n: opt.n || 300, seed: 777 + i * 6 + j, sigma: opt.sigma, bonus: opt.bonus, attr: opt.attr });
+        W[i].push(st.p); PM[i].push(st.p * st.a1 + (1 - st.p) * st.a0); PT[i].push(st.p * st.b1 + (1 - st.p) * st.b0);
+      }
+    }
+    return { W: W, mine: PM, theirs: PT };
+  }
+
+  /* ---------- the race: simulate the remaining rounds many times ---------- */
+  // players: [{key, name, score, wins, form (slot order, last played), tr (troops, slot order)}]
+  // Pairing: players sorted by wins plus noise (sd = opt.pairNoise wins), then neighbours meet. Fitted on days 1-2:
+  // it reproduces how far apart in wins opponents were (same wins about half the time, 1 apart a third).
+  function simulateRace(players, opt) {
+    var N = players.length, R = opt.roundsLeft, runs = opt.runs || 1000, adv = opt.advance || 8, focus = opt.focus != null ? opt.focus : -1;
+    var rnd = mulberry32(opt.seed || 2026), tau = opt.pairTau || 1.25;
+    var cache = opt.cache || new Map(), statOpt = { n: opt.pairSims || 120, mixSims: opt.mixSims || 24, sigma: opt.sigma, bonus: opt.bonus, attr: opt.attr };
+    // Pairing: each player in random order meets a random unpaired player, weighted exp(-wins apart / tau).
+    // Fitted on day 2 (tau 1.25): reproduces how far apart in wins opponents were and how widely the leaders' opponents spread.
+    var K = []; for (var d = 0; d <= 64; d++) K.push(Math.exp(-d / tau));
+    var bucket = [], posIn = new Int32Array(N);
+    function pairRound(wn) {
+      bucket.length = 0;
+      var i2, maxW = 0;
+      for (i2 = 0; i2 < N; i2++) { var w0 = wn[i2] | 0; if (w0 > maxW) maxW = w0; }
+      for (i2 = 0; i2 <= maxW; i2++) bucket.push([]);
+      for (i2 = 0; i2 < N; i2++) { var b0 = bucket[wn[i2] | 0]; posIn[i2] = b0.length; b0.push(i2); }
+      var take = function (x) { var bb = bucket[wn[x] | 0], last = bb.pop(); if (last !== x) { bb[posIn[x]] = last; posIn[last] = posIn[x]; } };
+      var seq = idx.slice();
+      for (i2 = N - 1; i2 > 0; i2--) { var r2 = Math.floor(rnd() * (i2 + 1)), tmp = seq[i2]; seq[i2] = seq[r2]; seq[r2] = tmp; }
+      var used = new Uint8Array(N), out = [];
+      for (var q = 0; q < N; q++) {
+        var me = seq[q]; if (used[me]) continue;
+        take(me); used[me] = 1;
+        var wm = wn[me] | 0, tot = 0, v;
+        for (v = 0; v <= maxW; v++) tot += bucket[v].length * K[Math.abs(wm - v)];
+        if (tot <= 0) break;
+        var x = rnd() * tot;
+        for (v = 0; v <= maxW; v++) { x -= bucket[v].length * K[Math.abs(wm - v)]; if (x <= 0 && bucket[v].length) break; }
+        if (v > maxW) { v = maxW; while (v >= 0 && !bucket[v].length) v--; }
+        var bv = bucket[v], op = bv[Math.floor(rnd() * bv.length)];
+        take(op); used[op] = 1; out.push(me, op);
+      }
+      return out;
+    }
+    function stat(i, j) {
+      var key = i < j ? i * 4096 + j : j * 4096 + i, s = cache.get(key);
+      if (!s) {
+        var lo = i < j ? i : j, hi = i < j ? j : i;
+        s = matchStats(players[lo].form, players[hi].form, players[lo].tr, players[hi].tr, Object.assign({ seed: 99 + key }, statOpt));
+        cache.set(key, s);
+      }
+      return i < j ? s : { p: 1 - s.p, a1: s.b0, b1: s.a0, a0: s.b1, b0: s.a1 }; // seen from i's side
+    }
+    var top = new Float64Array(N), sumScore = new Float64Array(N), meetDay = new Float64Array(N), meetNext = new Float64Array(N);
+    var all = !!opt.meetAll, MN = all ? new Float32Array(N * N) : null, MD = all ? new Float32Array(N * N) : null;
+    var wPts = new Float64Array(N), wCnt = new Float64Array(N), lPts = new Float64Array(N), lCnt = new Float64Array(N);
+    var rankHist = new Float64Array(N + 1), cutScores = [];
+    var sc = new Float64Array(N), wn = new Float64Array(N), idx = [], form = new Float64Array(N), g = gaussFrom(rnd), formSd = opt.formSd != null ? opt.formSd : 1.0;
+    // Each run, every player gets a form factor that lasts the whole run: on day 2, results spread twice as wide as
+    // independent fights would (hidden strength, lineup changes). A logit sd of 1.0 reproduced that spread.
+    var lg = function (p) { p = Math.min(0.997, Math.max(0.003, p)); return Math.log(p / (1 - p)); };
+    for (var i = 0; i < N; i++) idx.push(i);
+    for (var run = 0; run < runs; run++) {
+      for (i = 0; i < N; i++) { sc[i] = players[i].score; wn[i] = players[i].wins; form[i] = formSd * g(); }
+      for (var r = 0; r < R; r++) {
+        var ord = pairRound(wn);
+        for (var m = 0; m + 1 < ord.length; m += 2) {
+          var a = ord[m], b = ord[m + 1], s = stat(a, b), aw = rnd() < 1 / (1 + Math.exp(-(lg(s.p) + form[a] - form[b])));
+          if (a === focus || b === focus) { var o = a === focus ? b : a; if (r === 0) meetNext[o]++; if (r < (opt.dayRounds || 8)) meetDay[o]++; }
+          if (all) { if (r === 0) { MN[a * N + b]++; MN[b * N + a]++; } if (r < (opt.dayRounds || 8)) { MD[a * N + b]++; MD[b * N + a]++; } }
+          if (aw) { sc[a] += s.a1; sc[b] += s.b1; wn[a]++; wPts[a] += s.a1; wCnt[a]++; lPts[b] += s.b1; lCnt[b]++; }
+          else { sc[a] += s.a0; sc[b] += s.b0; wn[b]++; wPts[b] += s.b0; wCnt[b]++; lPts[a] += s.a0; lCnt[a]++; }
+        }
+      }
+      var fin = idx.slice().sort(function (a, b) { return sc[b] - sc[a]; });
+      for (var t = 0; t < adv && t < N; t++) top[fin[t]]++;
+      if (focus >= 0) rankHist[fin.indexOf(focus) + 1]++;
+      cutScores.push(sc[fin[adv - 1]]);
+      for (i = 0; i < N; i++) sumScore[i] += sc[i];
+    }
+    cutScores.sort(function (a, b) { return a - b; });
+    return {
+      top: Array.prototype.map.call(top, function (v) { return v / runs; }),
+      meanScore: Array.prototype.map.call(sumScore, function (v) { return v / runs; }),
+      meetNext: Array.prototype.map.call(meetNext, function (v) { return v / runs; }),
+      meetDay: Array.prototype.map.call(meetDay, function (v) { return v / runs; }),
+      rankHist: Array.prototype.map.call(rankHist, function (v) { return v / runs; }),
+      cut: { p10: cutScores[Math.floor(0.1 * runs)], p50: cutScores[Math.floor(0.5 * runs)], p90: cutScores[Math.floor(0.9 * runs)] },
+      meetNextAll: MN, meetDayAll: MD, runs: runs,
+      winPts: Array.prototype.map.call(wPts, function (v, k) { return wCnt[k] ? v / wCnt[k] : 0; }),
+      lossPts: Array.prototype.map.call(lPts, function (v, k) { return lCnt[k] ? v / lCnt[k] : 0; }),
+      stat: stat, pairs: cache.size
+    };
+  }
+
+  var E = null;
+  var api = { PER_TROOP: PER_TROOP, WIN_BONUS: WIN_BONUS, troopsOf: troopsOf, troopsFor: troopsFor, fightPts: fightPts, pairStats: pairStats, matchStats: matchStats, pointsMatrix: pointsMatrix, simulateRace: simulateRace,
+    use: function (engine) { E = engine; return api; } };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  else { root.DuelRace = api; if (root.DuelEngine) E = root.DuelEngine; }
+})(typeof window !== 'undefined' ? window : this);
+
+</script>
+<script>
 (() => {
   'use strict';
   const E = window.DuelEngine;
-  const VIEWS = ['next', 'insights', 'opponents', 'log', 'patterns', 'setup'];
+  const VIEWS = ['next', 'race', 'insights', 'opponents', 'log', 'patterns', 'setup'];
   const DEF_SHARED = { me: 'Sammyboy99', bonus: 0.04, sigma: 0.03, attr: 1.5, sims: 1500 };
   const DEF_PERSONAL = { me: '', myForm: null };
   const LS_ME = 'lw-duel-tracker-me-v1';
@@ -1198,6 +1422,9 @@ details[open] > summary { margin-bottom: 10px; }
   // Pairings go by record, so players whose record matches yours are the likeliest next opponents.
   // Only players with a fight logged in every round have a record that can be trusted.
   function likelyOpps() {
+    // With the race simulation: the players most likely to be your next opponent.
+    const rx = raceOf(settings().me);
+    if (rx && rx.r[7].length) return rx.r[7].slice().sort((a, b) => b[2] - a[2]).filter((o) => o[2] >= 0.02).slice(0, 6).map((o) => ({ name: rx.G.p[o[0]][0], chance: o[2] }));
     const ix = fullIndex(), me = ix.players[key(settings().me)];
     if (!me) return [];
     const G = groupInfo(), grp = G.comp[me.key];
@@ -1588,16 +1815,18 @@ details[open] > summary { margin-bottom: 10px; }
     const mine = myLog(), meName = settings().me, hasLog = ix.battles.length > 0;
     const likely = likelyOpps().filter((x) => key(x.name) !== key(S.opp));
     const src = isDemo() ? 'example squads' : valid(S.personal.myForm) ? 'entered by hand in <a href="#setup">Setup</a>' : mine ? `from your round ${esc(mine.round)} report` : '';
+    const rx = raceOf(meName);
+    const raceLine = rx ? `<p class="meta">Top 8 chance: <b>${pct(rx.r[3])}</b> · #${rx.i + 1} in group ${esc(rx.g)} · <a href="#race">The race</a></p>` : '';
     const meNote = mf ? `<div class="row">${orderHTML(mf)}<span class="meta">${src}</span></div>`
       : meName ? `<p class="meta">No fights logged under this name yet. Add your squads in <a href="#setup">Setup</a>.</p>`
       : `<p class="meta">${hasLog ? 'Your squads fill in from your latest battle report.' : 'Or add your squads in Setup.'}</p>`;
 
     let opp = `<section class="card c-opp" aria-labelledby="h-opp">
       <div class="card-h"><h2 id="h-opp">Matchup</h2></div>
-      <div class="field"><label class="lbl" for="me-pick">You</label>${meSelect('me-pick')}${meNote}</div>
+      <div class="field"><label class="lbl" for="me-pick">You</label>${meSelect('me-pick')}${meNote}${raceLine}</div>
       <div class="vsd" aria-hidden="true">vs</div>
       <div class="field"><label class="lbl" for="opp-pick">Opponent</label>${oppSelect()}</div>
-      ${likely.length ? `<div class="stack"><span class="lbl">Likely next, by record</span><div class="quick flow" role="group" aria-label="Likely next opponents">${likely.map((x) => `<button type="button" class="btn small" data-act="opp" data-name="${esc(x.name)}">${esc(short(x.name.replace(/^\[Example\] /, '')))} <span class="rec">${x.w}–${x.l}</span></button>`).join('')}</div></div>` : ''}`;
+      ${likely.length ? `<div class="stack"><span class="lbl">${likely[0].chance != null ? 'Likely next round' : 'Likely next, by record'}</span><div class="quick flow" role="group" aria-label="Likely next opponents">${likely.map((x) => `<button type="button" class="btn small" data-act="opp" data-name="${esc(x.name)}">${esc(short(x.name.replace(/^\[Example\] /, '')))} <span class="rec">${x.chance != null ? pct(x.chance) : `${x.w}–${x.l}`}</span></button>`).join('')}</div></div>` : ''}`;
     const manualOpp = S.oppManual || (!!S.opp && !pl);
     if (S.opp || manualOpp) {
       const open = manualOpp || S.oppOpen || S.oppEdited;
@@ -1640,7 +1869,7 @@ details[open] > summary { margin-bottom: 10px; }
     you += '</section>';
 
     let out;
-    if (pr) out = heroCard(pr) + ovCard(pr, mf) + predCard(pr) + scoutCard(pl, pr, mf) + mixCard(pr) + mxCard(pr);
+    if (pr) { const kill = pr.ev[pr.best] < 0.1 ? killPlan(pr, pl) : null; out = (kill ? killCard(pr, kill) : heroCard(pr)) + ovCard(pr, mf) + predCard(pr) + scoutCard(pl, pr, mf) + mixCard(pr) + mxCard(pr); }
     else if (waiting) out = '<section class="card hero c-hero"><div class="card-h"><h2>Play this order</h2></div><div class="empty">Working out the call…</div></section>';
     else {
       const msg = !mf ? (hasLog && !meName ? 'Pick your name to get a call.' : 'Add your squads in Setup to get a call.') : !S.opp ? (S.oppManual ? 'Type their name and formation to get a call.' : 'Pick your opponent to get a call.') : 'Enter type and power for all three of their squads to get a call.';
@@ -1704,6 +1933,8 @@ details[open] > summary { margin-bottom: 10px; }
     else if (sg && !sameAll && sg.pairs >= 3 && sg.moves === 0) facts.push({ t: `Strong squad (${TS[sg.q.t]}) always ${ORD[sg.slot]}`, hot: true });
     const meK = key(settings().me), met = es.filter((e) => e.oppKey === meK);
     if (met.length) { const last = met[met.length - 1]; facts.push({ t: `Rematch: you ${last.won ? 'lost' : 'won'} round ${last.round}`, hot: true }); }
+    const orx = raceOf(pl.name);
+    if (orx) facts.push({ t: `Top 8 chance ${pct(orx.r[3])}`, hot: false });
     facts.push({ t: `${wins}–${n - wins} record`, hot: false });
     return `<div class="facts" role="list" aria-label="Key facts">${facts.map((f) => `<span role="listitem" class="fact${f.hot ? ' hot' : ''}">${esc(f.t)}</span>`).join('')}</div>`;
   }
@@ -1755,6 +1986,7 @@ details[open] > summary { margin-bottom: 10px; }
       <div class="card-h"><h2 id="h-hero">Play this order</h2><span class="stamp">vs ${esc(short(S.opp))}</span></div>
       ${permHTML(pr.myCanon, b, true)}
       <div class="big-row"><span class="big-num">${pct(ev)}</span><span class="cap">chance to win if they play the way the model expects</span></div>
+      ${ev >= 0.35 && ev <= 0.65 ? '<p class="callout key"><b>Key match:</b> about even. Toss-ups like this decide the top 8, so check their latest formation in the game before you lock in.</p>' : ''}
       ${lopsided ? `<p class="callout">${lopsided}</p>` : `<p class="callout">Worst case ${pct(pr.worst[b])}, if they play ${minis(E.orderSquads(pr.theirCanon, pr.worstAgainst[b]))}. ${gain < 0.02 ? 'Reading this player barely helps here, so the safe mix below is about as good.' : `The safe mix only guarantees ${pct(pr.nash.value)}.`}</p>`}
       <div class="scroll"><table><thead><tr><th>Other orders</th><th>If predicted</th><th>Worst case</th></tr></thead><tbody>
         ${others.map((k) => `<tr><td>${permHTML(pr.myCanon, k)}</td><td>${pct(pr.ev[k])}</td><td>${pct(pr.worst[k])}</td></tr>`).join('')}
@@ -2151,6 +2383,104 @@ details[open] > summary { margin-bottom: 10px; }
     return `<div class="grid2"><div class="stack" style="gap:16px">${head}${tipCard}</div><div class="stack" style="gap:16px">${list2}</div></div>`;
   }
 
+  /* ---------- Top 8: the race to advance (data/race.json, simulated at each daily import) ---------- */
+  function loadRace() {
+    if (S.raceState) return;
+    S.raceState = 'loading';
+    fetch('data/race.json', { cache: 'no-cache' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { S.race = d && d.groups ? d : null; S.raceState = S.race ? 'ok' : 'none'; RACEIX = null; render(); })
+      .catch(() => { S.raceState = 'none'; render(); });
+  }
+  let RACEIX = null;
+  // A player's row in the race: { g, i (place by score), G (group), r: [name, score, wins, top-8 chance, avg final K, points per win K, per loss K, opponents] }
+  function raceOf(name) {
+    if (!S.race || !name) return null;
+    if (!RACEIX) { RACEIX = new Map(); Object.keys(S.race.groups).forEach((g) => S.race.groups[g].p.forEach((r, i) => RACEIX.set(key(r[0]), { g, i }))); }
+    const at = RACEIX.get(key(name));
+    if (!at) return null;
+    const G = S.race.groups[at.g];
+    return { g: at.g, i: at.i, G, r: G.p[at.i] };
+  }
+  const fmtK = (k) => `${(k / 1000).toFixed(1)}M`; // thousands of points
+  const fmtS = (v) => `${(v / 1e6).toFixed(2)}M`; // points
+  // Wins needed to reach the likely 8th-place finish, at this player's simulated points per win and per loss.
+  function winsNeeded(x) {
+    const left = S.race.rounds - S.race.round, need = x.G.cut[1] * 1000 - x.r[1];
+    const win = (x.r[5] || 1080) * 1000, loss = (x.r[6] || 330) * 1000;
+    if (need <= left * loss) return 0;
+    return Math.ceil((need - left * loss) / Math.max(1, win - loss));
+  }
+  const raceTag = (p) => (p > 0.9 ? ['ok', 'Should win'] : p >= 0.65 ? ['ok', 'Favoured'] : p >= 0.35 ? ['warn', 'Key match'] : p >= 0.1 ? ['', 'Underdog'] : ['bad', 'Play for kills']);
+  function viewRace() {
+    loadRace();
+    const me = settings().me, st = S.raceState;
+    const title = (aside) => `<div class="card-h"><h2>Top 8</h2>${aside ? `<span class="aside">${aside}</span>` : ''}</div>`;
+    if (st !== 'ok') return `<section class="card">${title()}<div class="empty">${st === 'none' ? "Top-8 odds aren't available right now." : 'Loading the standings…'}</div></section>`;
+    const R = S.race, left = R.rounds - R.round, played = R.round, asOf = `after round ${R.round} of ${R.rounds}`;
+    const x = raceOf(me);
+    if (!x) return `<section class="card">${title(asOf)}<div class="empty">${me ? `${esc(me)} isn't in the qualifier standings.` : 'Pick your name on Next fight to see your chance of making the top 8.'}</div></section>`;
+    const { G, r, g } = x, chance = r[3];
+    const cut = `${fmtK(G.cut[1])} (likely ${fmtK(G.cut[0])}–${fmtK(G.cut[2])})`;
+    let verdict;
+    if (chance >= 0.99) verdict = `You're all but through. 8th place is likely to finish around ${cut}; your simulated finish averages ${fmtK(r[4])}.`;
+    else if (chance < 0.01) verdict = `On current squad strength the top 8 is out of reach: 8th place is likely to finish around ${cut}, and your simulated finish averages ${fmtK(r[4])}. Every point still counts for your final place, so play for kills in fights you can't win.`;
+    else {
+      const w = winsNeeded(x);
+      verdict = `8th place is likely to finish around ${cut}. From ${fmtS(r[1])} that takes about <b>${Math.min(w, left)} wins in your last ${left} fights</b>${w > left ? ' and some luck' : ''}. A win is worth about ${fmtK(r[5] || 1080)} to you, a loss about ${fmtK(r[6] || 330)}.`;
+    }
+    const head = `<section class="card">${title(`group ${esc(g)} · ${asOf}`)}
+      <div class="big-row"><span class="big-num">${pct(chance)}</span><span class="cap">chance ${esc(r[0])} finishes in the top 8 of group ${esc(g)}</span></div>
+      <div>${stat('Now', `#${x.i + 1} of ${G.p.length} · ${fmtS(r[1])} · ${r[2]}–${played - r[2]}`)}${stat('Rounds left', `${left}, 8 a day`)}</div>
+      <p>${verdict}</p></section>`;
+    const opps = r[7].slice().sort((a, b) => b[1] - a[1]);
+    const keyN = opps.filter((o) => o[3] >= 0.35 && o[3] < 0.65).length, killN = opps.filter((o) => o[3] < 0.1).length;
+    const oppRows = opps.map(([j, md, mn, pw]) => {
+      const o = G.p[j], tg = raceTag(pw);
+      return `<tr class="${tg[0] === 'warn' ? 'key' : ''}"><td><button type="button" class="linkbtn" data-act="raceopp" data-name="${esc(o[0])}">${esc(short(o[0]))}</button> <span class="meta">${o[2]}–${played - o[2]}</span><div><span class="tag ${tg[0]}">${tg[1]}</span></div></td><td>${pct(mn)}</td><td>${md.toFixed(1)}</td><td><b>${pct(pw)}</b></td></tr>`;
+    }).join('');
+    const oppCard = `<section class="card"><div class="card-h"><h2>Next 8 rounds</h2><span class="aside">who you'll likely meet</span></div>
+      <p class="meta">${keyN ? `${plural(keyN, 'key match')} (about even): these decide your top 8. ` : ''}${killN ? `${killN === 1 ? 'One of them is' : killN + ' of them are'} out of reach, so play for kills there: Next fight shows the order that kills the most. ` : ''}Tap a name for the call.</p>
+      <div class="scroll"><table class="race-opps"><thead><tr><th>Opponent</th><th>Next round</th><th>Meets</th><th>Win</th></tr></thead><tbody>${oppRows}</tbody></table></div>
+      <p class="foot">Pairing goes by record with plenty of luck, so any single round is a guess. Meets = how many times you'd expect to face them in the next 8 rounds; Win = your chance against them.</p></section>`;
+    const rows = G.p.map((p, i) => ({ p, i })).filter((o) => o.p[3] >= 0.01 || o.i < 12 || o.i === x.i).sort((a, b) => b.p[3] - a.p[3] || a.i - b.i);
+    const raceCard = `<section class="card"><div class="card-h"><h2>Group ${esc(g)} race</h2><span class="aside">top 8 advance</span></div>
+      <div class="scroll"><table class="race"><thead><tr><th>Player <span class="meta">(place now)</span></th><th>Top 8</th><th>Record</th><th>Score</th></tr></thead><tbody>
+      ${rows.map((o) => `<tr class="${o.i === x.i ? 'me' : ''}"><td><span class="meta">#${o.i + 1}</span> ${esc(short(o.p[0]))}</td><td><span class="racebar"><span class="bar"><i style="width:${(o.p[3] * 100).toFixed(1)}%"></i></span><span class="pct">${pct(o.p[3])}</span></span></td><td>${o.p[2]}–${played - o.p[2]}</td><td>${fmtS(o.p[1])}</td></tr>`).join('')}
+      </tbody></table></div>
+      <p class="foot">${R.runs.toLocaleString()} simulated runs of the last ${left} rounds. Each fight uses both players' latest squads and troops, mostly in their usual order, and pairing follows records the way it did on days 1–2. Checked on day 2: it expected 5.6 wins per top-16 player against 5.7 real. Points: a loss scores 66 per enemy troop killed; a win scores 300,000 plus 66 per enemy troop killed and per troop you keep.</p></section>`;
+    return `<div class="grid2"><div class="stack" style="gap:16px">${head}${oppCard}</div><div class="stack" style="gap:16px">${raceCard}</div></div>`;
+  }
+  // When no order wins: the order that scores the most points, i.e. kills the most of their troops.
+  function killPlan(pr, pl) {
+    const D = window.DuelRace;
+    if (!D) return null;
+    const me = fullIndex().players[key(settings().me)];
+    const tmMe = me ? D.troopsOf(me.entries) : {}, tmOpp = pl ? D.troopsOf(pl.entries) : {};
+    const avgOf = (m) => { const v = Object.values(m); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0; };
+    const fbMe = avgOf(tmMe) || avgOf(tmOpp) || 2800, fbOpp = avgOf(tmOpp) || fbMe;
+    const trMine = pr.myCanon.map((q) => (q.id != null && tmMe[String(q.id)]) || fbMe);
+    const trTheirs = pr.theirCanon.map((q) => (q.id != null && tmOpp[String(q.id)]) || fbOpp);
+    const st = settings();
+    const M = D.pointsMatrix(pr.myCanon, pr.theirCanon, trMine, trTheirs, { n: 200, sigma: +st.sigma, bonus: +st.bonus, attr: +st.attr || 1.5 });
+    const exp = M.mine.map((row) => row.reduce((acc, v, j) => acc + v * pr.p[j], 0));
+    return { exp, best: exp.indexOf(Math.max.apply(null, exp)), guessed: !Object.keys(tmMe).length || !Object.keys(tmOpp).length };
+  }
+  function killCard(pr, k) {
+    const b = k.best, others = [0, 1, 2, 3, 4, 5].filter((i) => i !== b).sort((x, y) => k.exp[y] - k.exp[x]);
+    const pts = (v) => `${Math.round(v / 1000).toLocaleString()}K`;
+    return `<section class="card hero c-hero" aria-labelledby="h-kill">
+      <div class="card-h"><h2 id="h-kill">Play for kills</h2><span class="stamp">vs ${esc(short(S.opp))}</span></div>
+      ${permHTML(pr.myCanon, b, true)}
+      <div class="big-row"><span class="big-num">${pts(k.exp[b])}</span><span class="cap">points you can expect: about ${Math.round(k.exp[b] / 66).toLocaleString()} of their troops killed, at 66 points each</span></div>
+      <p class="callout">You can't win this one: the best order wins about ${pct(pr.ev[pr.best])}. A loss still scores 66 points per enemy troop you kill, so this order is set up to kill the most.${b !== pr.best ? ` The order with the best win chance would score about ${pts(k.exp[pr.best])}.` : ''}${k.guessed ? ' Troop counts are estimated, since a battle report is missing.' : ''}</p>
+      <div class="scroll"><table><thead><tr><th>Other orders</th><th>Points</th><th>Win chance</th></tr></thead><tbody>
+        ${others.map((i) => `<tr><td>${permHTML(pr.myCanon, i)}</td><td>${pts(k.exp[i])}</td><td>${pct(pr.ev[i])}</td></tr>`).join('')}
+      </tbody></table></div>
+      <p class="foot">Whatever you play now becomes the formation your next opponent sees.</p>
+    </section>`;
+  }
+
   /* ---------- Setup ---------- */
   function exportJSON() {
     return JSON.stringify(S.battles.map((b) => { const n = E.normBattle(b); return n ? Object.assign({ round: n.round }, n.g ? { g: n.g } : {}, { a: n.a, b: n.b, win: n.win }, n.e ? { e: n.e } : {}) : null; }).filter(Boolean));
@@ -2204,7 +2534,7 @@ details[open] > summary { margin-bottom: 10px; }
     return `<div class="grid2"><div class="stack" style="gap:16px">${you}${team}${sim}</div><div class="stack" style="gap:16px">${data}${how}</div></div>`;
   }
 
-  const VIEW = { next: viewNext, insights: viewInsights, opponents: viewOpponents, log: viewLog, patterns: viewPatterns, setup: viewSetup };
+  const VIEW = { next: viewNext, race: viewRace, insights: viewInsights, opponents: viewOpponents, log: viewLog, patterns: viewPatterns, setup: viewSetup };
 
   /* ---------- actions ---------- */
   async function saveForm() {
@@ -2279,6 +2609,7 @@ details[open] > summary { margin-bottom: 10px; }
     if (a === 'real') { S.forceReal = true; location.hash = '#setup'; render(); }
     else if (a === 'dismiss') { S.note = ''; S.noteErr = false; render(); }
     else if (a === 'opp') { setOpp(el.dataset.name); S.oppOpen = false; render(); }
+    else if (a === 'raceopp') { setOpp(el.dataset.name); S.oppOpen = false; if (location.hash !== '#next') location.hash = 'next'; else render(); }
     else if (a === 'oedit') { S.oppOpen = !S.oppOpen; render(); }
     else if (a === 'melog') { S.personal.myForm = null; S.meDraft = null; S.shownPerm = null; S.roll = null; savePersonal(); render(); }
     else if (a === 'mehand') {
@@ -2402,6 +2733,7 @@ details[open] > summary { margin-bottom: 10px; }
       S.bundleState = S.bundle.length ? 'ok' : 'none';
     } catch (e) { S.bundle = []; S.bundleState = 'none'; }
     bump(); render();
+    loadRace();
   }
 
   /* ---------- boot ---------- */
