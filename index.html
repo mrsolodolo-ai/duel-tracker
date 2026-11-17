@@ -273,18 +273,19 @@ details[open] > summary { margin-bottom: 10px; }
   var TYPE_NAME = { T: 'Tank', A: 'Aircraft', M: 'Missile', X: 'Mixed' };
   var BEATS = { T: 'M', M: 'A', A: 'T' }; // key beats value
   var PERMS = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
-  var EXPERTS = ['habit', 'strongest', 'counter', 'wsls', 'double', 'random'];
+  var EXPERTS = ['habit', 'strongest', 'counter', 'wsls', 'double', 'dodge', 'random'];
   var EXPERT_INFO = {
     habit: { label: 'Creature of habit', blurb: 'Plays the order they used most recently.' },
     strongest: { label: 'Strongest squad first', blurb: 'Leads with their highest-power squad, as most guides advise.' },
     counter: { label: 'Counters what they see', blurb: "Picks the order that beats their opponent's last formation." },
     wsls: { label: 'Keeps a win, changes a loss', blurb: 'Same order after a win; something different after a loss.' },
     double: { label: 'Second-guesser', blurb: 'Expects to be countered, so counters the counter.' },
+    dodge: { label: 'Dodges counters with strong squad', blurb: "Keeps their strong squad (Overlord and most mythic gear) away from the counter in their opponent's last order, ideally against a squad it beats." },
     random: { label: 'Unpredictable', blurb: 'No pattern the model can find.' }
   };
   var REMATCH_INFO = { label: 'Remembers your last meeting', blurb: 'In a rematch, replays the order that beat you, or counters the order that beat them.' };
   var RM_PRIOR = { a: 1, b: 2 }; // weak prior: about a third of rematch choices follow the last meeting
-  var DEFAULT_W = { habit: 0.40, strongest: 0.15, counter: 0.15, wsls: 0.12, double: 0.06, random: 0.12 };
+  var DEFAULT_W = { habit: 0.40, strongest: 0.15, counter: 0.15, wsls: 0.12, double: 0.06, dodge: 0.08, random: 0.12 };
   var DEFAULTS = {
     bonus: 0.04,     // counter edge on hero power when a squad's type beats the enemy's (fitted on 391 real encounters)
     sigma: 0.03,     // spread of hidden strength around listed power (lognormal sd, per squad; fitted)
@@ -590,7 +591,40 @@ details[open] > summary { margin-bottom: 10px; }
       d.double = ctx.W ? bestResponse(ctx.W, minResponse(ctx.W, h, opt.tie), opt.tie) : U;
     } else { d.wsls = U; d.double = U; }
     d.random = U;
+    d.dodge = ctx.strong != null && ctx.seenCanon && ctx.oppHabit ? dodgeDist(ctx.canon, ctx.strong, ctx.seenCanon, ctx.oppHabit, ctx.prevPerms) : U;
     return d;
+  }
+  // Strong squad (Overlord + most mythic gear): kept away from the slot where the opponent's expected order has its counter,
+  // and toward a slot facing a squad it beats. The first three encounters always pair slot 1 v 1, 2 v 2, 3 v 3.
+  // The other two squads usually keep their order from last time. Tested on all groups' reports: better calibrated calls.
+  function dodgeDist(canon, s, seenCanon, seenHabit, prevPerms) {
+    var t = canon[s].t, prey = BEATS[t], pred = null, k, i, j;
+    for (k in BEATS) if (BEATS[k] === t) pred = k;
+    if (!prey) return uniform6();
+    var pp = [0, 0, 0], pc = [0, 0, 0];
+    for (j = 0; j < 6; j++) for (i = 0; i < 3; i++) {
+      var ot = seenCanon[PERMS[j][i]].t;
+      if (ot === prey) pp[i] += seenHabit[j]; else if (ot === pred) pc[i] += seenHabit[j];
+    }
+    var last = prevPerms.length ? prevPerms[prevPerms.length - 1] : null, p = [];
+    for (k = 0; k < 6; k++) {
+      var slot = PERMS[k].indexOf(s), f = pp[slot] + (1 - pp[slot] - pc[slot]) * 0.4 + pc[slot] * 0.03, g = 1;
+      if (last != null) {
+        var o1 = PERMS[k].filter(function (c) { return c !== s; }), o2 = PERMS[last].filter(function (c) { return c !== s; });
+        g = o1[0] === o2[0] ? 1 : 0.5;
+      }
+      p.push(f * g);
+    }
+    return normalizeArr(p);
+  }
+  // Which canonical squad is the strong one: the team with the Overlord and the most mythic gear, else the highest power.
+  function strongOf(canon, ex, form) {
+    if (ex && ex.ov && ex.m6 && form) {
+      var i = -1, k;
+      for (k = 0; k < form.length; k++) if (form[k].id === ex.ov) i = k;
+      if (i >= 0 && ex.m6[i] > 0 && ex.m6[i] >= Math.max.apply(null, ex.m6)) for (k = 0; k < 3; k++) if (canon[k].id === ex.ov) return k;
+    }
+    return strongestIndex(canon)[0];
   }
   function mixDists(d, w) {
     var p = [0, 0, 0, 0, 0, 0];
@@ -661,7 +695,10 @@ details[open] > summary { margin-bottom: 10px; }
     var lastResult = prev.length ? (prev[prev.length - 1].won ? 'W' : 'L') : null;
     var seen = seenOf(index, e.oppKey, e.round, e.oppForm, opt.decay);
     var W = winMatrix(c.canon, seen.canon, { bonus: opt.bonus, sigma: opt.sigma, attr: opt.attr, n: opt.fitSims });
-    var d = expertDists({ canon: c.canon, prevPerms: prevPerms, lastResult: lastResult, W: W, oppHabit: seen.habit }, opt);
+    var pex = null;
+    for (var q = prev.length - 1; q >= 0; q--) if (prev[q].ex) { pex = prev[q]; break; }
+    var strong = pex ? strongOf(c.canon, pex.ex, pex.form) : strongOf(c.canon, e.ex, e.form);
+    var d = expertDists({ canon: c.canon, prevPerms: prevPerms, lastResult: lastResult, W: W, oppHabit: seen.habit, strong: strong, seenCanon: seen.canon }, opt);
     // rematch: the latest earlier fight against this same opponent
     var meet = null;
     for (var i = prev.length - 1; i >= 0; i--) if (prev[i].oppKey === e.oppKey) { meet = prev[i]; break; }
@@ -791,7 +828,9 @@ details[open] > summary { margin-bottom: 10px; }
     var myHabit = habitDist(myPerms, opt.decay);
 
     var W = winMatrix(c.canon, mc.canon, { bonus: opt.bonus, sigma: opt.sigma, attr: opt.attr, n: q.sims || opt.sims }); // their view
-    var d = expertDists({ canon: c.canon, prevPerms: prevPerms, lastResult: lastResult, W: W, oppHabit: myHabit }, opt);
+    var lex = null;
+    for (var q2 = entries.length - 1; q2 >= 0; q2--) if (entries[q2].ex) { lex = entries[q2]; break; }
+    var d = expertDists({ canon: c.canon, prevPerms: prevPerms, lastResult: lastResult, W: W, oppHabit: myHabit, strong: lex ? strongOf(c.canon, lex.ex, lex.form) : strongestIndex(c.canon)[0], seenCanon: mc.canon }, opt);
     var w = pl ? model.playerW[k] : model.popW;
     var p = mixDists(d, w);
     // rematch: what happened the last time this player met you
@@ -1208,6 +1247,35 @@ details[open] > summary { margin-bottom: 10px; }
     return { n: es.length, last, ex, types, main: E.mainType(ex.tb), tbs, ov: ex.ov, op: ex.op, ovN: ovs.length, ovMoves, m6, m6Teams, m6Total, ur, gearMoves,
       gearLocked: es.length >= 3 && m6Total > 0 && gearMoves === 0 && m6Teams.length === 1 };
   }
+  // The strong squad in one fight: the team carrying the Overlord and the most mythic gear.
+  function strongSlot(e) {
+    const x = e.ex;
+    if (!x || !x.ov || !x.m6) return null;
+    const i = e.form.findIndex((q) => q.id === x.ov);
+    if (i < 0 || !(x.m6[i] > 0) || x.m6[i] < Math.max(...x.m6)) return null;
+    return { slot: i, q: e.form[i] };
+  }
+  const COUNTER_OF = { M: 'T', A: 'M', T: 'A' }; // the type that beats each type
+  const ORD = ['1st', '2nd', '3rd'];
+  // Where a player puts their strong squad, against the counter in their opponent's last lineup.
+  function strongHabit(pl) {
+    const P = fullIndex().players, o = { n: 0, faced: 0, exp: 0, pn: 0, prey: 0, preyExp: 0, pairs: 0, moves: 0, slot: null, q: null };
+    let last = null;
+    pl.entries.forEach((e) => {
+      const st = strongSlot(e);
+      if (!st) { last = null; return; }
+      if (last && last.q.id === st.q.id) { o.pairs++; if (last.slot !== st.slot) o.moves++; }
+      last = st; o.slot = st.slot; o.q = st.q;
+      const ctr = COUNTER_OF[st.q.t], pr = E.BEATS[st.q.t], op = P[e.oppKey], prev = op ? op.entries.filter((x) => x.round < e.round) : [];
+      if (!ctr || !prev.length) return;
+      const sh = prev[prev.length - 1].form, c = sh.filter((q) => q.t === ctr).length, b = sh.filter((q) => q.t === pr).length;
+      if (c > 0 && c < 3) { o.n++; o.exp += c / 3; if (sh[st.slot].t === ctr) o.faced++; }
+      if (b > 0 && b < 3) { o.pn++; o.preyExp += b / 3; if (sh[st.slot].t === pr) o.prey++; }
+    });
+    if (!o.q) return null;
+    o.dodges = o.moves >= 2 && o.pairs > 0 && o.moves / o.pairs >= 0.3 && o.n >= 4 && (o.faced <= o.exp - 1.5 || (o.pn >= 4 && o.prey >= o.preyExp + 1.5));
+    return o;
+  }
   let GL = null, GLK = '';
   function gearLocked() {
     if (GL && GLK === FIK) return GL;
@@ -1610,7 +1678,8 @@ details[open] > summary { margin-bottom: 10px; }
     const es = pl.entries, n = es.length, facts = [];
     const wins = es.filter((e) => e.won).length;
     const canon = E.canonical(es[n - 1].form).canon, perms = es.map((e) => E.matchPerm(e.form, canon));
-    if (n >= 3 && new Set(perms).size === 1) facts.push({ t: `Same order all ${n} fights`, hot: true });
+    const sameAll = n >= 3 && new Set(perms).size === 1;
+    if (sameAll) facts.push({ t: `Same order all ${n} fights`, hot: true });
     else if (n >= 3) {
       let kept = 0;
       for (let i = 1; i < n; i++) if (perms[i] === perms[i - 1]) kept++;
@@ -1630,6 +1699,9 @@ details[open] > summary { margin-bottom: 10px; }
         : { t: `Mythic gear on ${h.m6Teams.map(tt).join(' + ')}${h.n >= 3 ? ', never moved' : ''}`, hot: h.n >= 3 });
       else facts.push({ t: 'No mythic gear', hot: false });
     }
+    const sg = strongHabit(pl);
+    if (sg && sg.dodges) facts.push({ t: `Strong squad (${TS[sg.q.t]}) dodges counters`, hot: true });
+    else if (sg && !sameAll && sg.pairs >= 3 && sg.moves === 0) facts.push({ t: `Strong squad (${TS[sg.q.t]}) always ${ORD[sg.slot]}`, hot: true });
     const meK = key(settings().me), met = es.filter((e) => e.oppKey === meK);
     if (met.length) { const last = met[met.length - 1]; facts.push({ t: `Rematch: you ${last.won ? 'lost' : 'won'} round ${last.round}`, hot: true }); }
     facts.push({ t: `${wins}–${n - wins} record`, hot: false });
@@ -1653,6 +1725,8 @@ details[open] > summary { margin-bottom: 10px; }
       ? `${h.m6Teams.map((id) => `${h.m6[id]} on ${tl(id)}`).join(', ')} · ${h.gearMoves ? 'moved ' + plural(h.gearMoves, 'time') : h.n > 1 ? 'never moved' : 'one fight seen'}`
       : 'none'));
     if (Object.keys(h.ur).length) rows.push(stat('UR gear (M5)', h.last.form.map((q) => `${h.ur[q.id] || 0} on ${TS[q.t]}`).join(' · ')));
+    const sg = strongHabit(pl);
+    if (sg) rows.push(stat('Strong squad <span class="meta">(Overlord + most mythic)</span>', `${TS[sg.q.t]} · ${sg.pairs ? (sg.moves ? `moved ${sg.moves} of ${sg.pairs} times` : `always ${ORD[sg.slot]}`) : 'one fight seen'}${sg.n ? ` · opposite its counter ${sg.faced} of ${sg.n} times <span class="meta">(about ${Math.round(sg.exp)} at random)</span>` : ''}`));
     let alt = '';
     if (h.ov && h.op > 0 && !S.oppEdited && mf) {
       const m = model(), mc = E.canonical(mf).canon, shownK = S.shownPerm != null ? S.shownPerm : defaultShown(mf).k;
@@ -2123,8 +2197,8 @@ details[open] > summary { margin-bottom: 10px; }
     const how = `<section class="card" aria-labelledby="h-how"><div class="card-h"><h2 id="h-how">How the tracker works</h2></div><div class="prose">
       <p>Each encounter, both sides send the next squad in line. The winner goes to the back of its line with the troops it has left; the loser is out. The fight ends when one side has no squads left, so it takes 3 to 5 encounters. This rule matched every one of 391 encounters in real battle reports.</p>
       <p>The simulator plays all 36 pairings of your order against theirs, ${(+st.sims || 1500).toLocaleString()} times each, letting every squad's real strength drift about ${pct(+st.sigma, 1)} from its listed power. A squad whose type beats its opponent's (Tank beats Missile, Missile beats Aircraft, Aircraft beats Tank) fights as if it had ${pct(+st.bonus, 1)} more power. Both numbers were fitted to real encounters: power decides almost everything, and the counter edge is small.</p>
-      <p>To predict an opponent, the tracker replays their logged fights against six habits: repeating their last order, leading with their strongest squad, countering the formation they could see, keeping a winning order and changing a losing one, second-guessing, and picking at random. It learns how much of each habit that player shows. Players with only a few fights lean on how everyone in your log behaves.</p>
-      <p>When you meet someone again, they know exactly what you played against them last time. The tracker adds a seventh habit for rematches: replay the order that won, or counter the order that beat them. It learns how often each player does that.</p>
+      <p>To predict an opponent, the tracker replays their logged fights against seven habits: repeating their last order, leading with their strongest squad, countering the formation they could see, keeping a winning order and changing a losing one, second-guessing, keeping their strong squad (Overlord and most mythic gear) away from its counter in the formation they could see, and picking at random. It learns how much of each habit that player shows. Players with only a few fights lean on how everyone in your log behaves.</p>
+      <p>When you meet someone again, they know exactly what you played against them last time. The tracker adds an eighth habit for rematches: replay the order that won, or counter the order that beat them. It learns how often each player does that.</p>
       <p>The call is the order that wins most often against that prediction. The safe mix is the game-theory answer: odds that guarantee a minimum win chance whatever they play, for when you'd rather not be read.</p>
       <p>Anyone with Contributor access can log battle reports here, and the owner can ask Claude to import whole groups straight from the duel's battle reports.</p></div></section>`;
     return `<div class="grid2"><div class="stack" style="gap:16px">${you}${team}${sim}</div><div class="stack" style="gap:16px">${data}${how}</div></div>`;
