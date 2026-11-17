@@ -1,0 +1,1924 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Last War Duel Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Stencil+Display:wght@700;800&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Semi+Condensed:wght@500;600;700&display=swap">
+<style>
+:root {
+  /* Layout: a field-scouting sheet. Tab rail on top; on Next fight the call leads and the evidence follows. */
+  --bg: #e6e4da;
+  --panel: #f6f5ef;
+  --field: #fffefa;
+  --ink: #1b1f21;
+  --muted: #59605b;
+  --line: #cfcbbe;
+  --accent: #4b5a1a;
+  --accent-ink: #f7f6ee;
+  --tank: #b04f26;
+  --air: #2a69a6;
+  --msl: #876707;
+  --mix: #686c6f;
+  --chip-ink: #ffffff;
+  --win: #2b7743;
+  --loss: #a3323d;
+  --display: 'Big Shoulders Stencil Display', 'Barlow Semi Condensed', 'Arial Narrow', sans-serif;
+  --body: 'Barlow', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --cond: 'Barlow Semi Condensed', 'Barlow', 'Arial Narrow', sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111416; --panel: #1a1f22; --field: #13171a; --ink: #e8e6dd; --muted: #9ca29d; --line: #2e363a;
+    --accent: #b5c66c; --accent-ink: #15190a; --tank: #e3814f; --air: #66a9ea; --msl: #ddb440; --mix: #a2a6a9;
+    --chip-ink: #111416; --win: #62c283; --loss: #e8717e; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111416; --panel: #1a1f22; --field: #13171a; --ink: #e8e6dd; --muted: #9ca29d; --line: #2e363a;
+  --accent: #b5c66c; --accent-ink: #15190a; --tank: #e3814f; --air: #66a9ea; --msl: #ddb440; --mix: #a2a6a9;
+  --chip-ink: #111416; --win: #62c283; --loss: #e8717e; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 15px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+h1, h2, h3 { margin: 0; text-wrap: balance; }
+p { margin: 0; }
+a { color: var(--accent); }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.num, td, .pct { font-variant-numeric: tabular-nums; }
+
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 16px 48px; }
+.top { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 20px 0 10px; }
+.brand { display: flex; flex-direction: column; gap: 2px; }
+.brand h1 { font-family: var(--display); font-weight: 800; font-size: 34px; line-height: .95; letter-spacing: .02em; text-transform: uppercase; }
+.brand .sub { font-family: var(--cond); font-weight: 600; font-size: 13px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.status { font-family: var(--cond); font-weight: 600; font-size: 13px; letter-spacing: .04em; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--panel); white-space: nowrap; }
+.status.ok { color: var(--win); border-color: color-mix(in oklab, var(--win) 40%, var(--line)); }
+.status.warn { color: var(--msl); border-color: color-mix(in oklab, var(--msl) 45%, var(--line)); }
+
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; margin-bottom: 16px; }
+.tabs a { font-family: var(--cond); font-weight: 700; font-size: 15px; letter-spacing: .06em; text-transform: uppercase; text-decoration: none; color: var(--muted); padding: 10px 12px 9px; border-bottom: 3px solid transparent; white-space: nowrap; }
+.tabs a:hover { color: var(--ink); }
+.tabs a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--accent); }
+
+.note { border: 1px solid var(--line); border-left: 4px solid var(--msl); background: var(--panel); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.note.err { border-left-color: var(--loss); }
+.note p { max-width: 70ch; }
+
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.card-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.card-h h2 { font-family: var(--cond); font-weight: 700; font-size: 14px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.card-h .aside { font-size: 13px; color: var(--muted); }
+.lbl { font-family: var(--cond); font-weight: 600; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+.hint { text-transform: none; letter-spacing: 0; font-family: var(--body); font-weight: 400; }
+.meta { font-size: 13px; color: var(--muted); }
+.stack { display: flex; flex-direction: column; gap: 8px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.quick { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
+.quick .btn { flex: none; }
+.quick.flow { flex-wrap: wrap; overflow: visible; }
+
+input[type="text"], input:not([type]), select, textarea { background: var(--field); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; width: 100%; min-width: 0; }
+textarea { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; min-height: 120px; resize: vertical; }
+select { appearance: auto; }
+select.pick { font-size: 16px; font-weight: 600; padding: 10px 12px; }
+.vsd { display: flex; align-items: center; gap: 10px; font-family: var(--display); font-weight: 800; font-size: 18px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.vsd::before, .vsd::after { content: ''; flex: 1; border-top: 1px solid var(--line); }
+.btn .rec { font-family: var(--body); font-weight: 500; color: var(--muted); margin-left: 4px; font-variant-numeric: tabular-nums; }
+
+.btn { border: 1px solid var(--line); background: var(--field); border-radius: 7px; padding: 8px 14px; font-family: var(--cond); font-weight: 700; letter-spacing: .04em; cursor: pointer; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.danger { color: var(--loss); }
+.btn.small { padding: 4px 10px; font-size: 13px; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.linkbtn { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; cursor: pointer; font: inherit; }
+
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: var(--field); }
+.seg button { border: 0; background: transparent; padding: 6px 9px; font-family: var(--cond); font-weight: 700; font-size: 13px; letter-spacing: .05em; cursor: pointer; color: var(--muted); }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--panel); }
+.seg button.t-T[aria-pressed="true"] { background: var(--tank); color: var(--chip-ink); }
+.seg button.t-A[aria-pressed="true"] { background: var(--air); color: var(--chip-ink); }
+.seg button.t-M[aria-pressed="true"] { background: var(--msl); color: var(--chip-ink); }
+.seg button.t-X[aria-pressed="true"] { background: var(--mix); color: var(--chip-ink); }
+
+.slot { display: grid; grid-template-columns: 22px auto minmax(70px, 1fr); gap: 8px; align-items: center; }
+.slot-n { font-family: var(--display); font-weight: 800; font-size: 20px; color: var(--muted); text-align: center; }
+.slot input { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* squads */
+.chip { --c: var(--mix); display: inline-flex; align-items: stretch; border-radius: 6px; border: 1px solid color-mix(in oklab, var(--c) 50%, transparent); background: color-mix(in oklab, var(--c) 13%, var(--panel)); overflow: hidden; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chip b { background: var(--c); color: var(--chip-ink); font-family: var(--cond); font-weight: 700; font-size: 12px; letter-spacing: .06em; padding: 2px 6px; display: flex; align-items: center; }
+.chip span { padding: 2px 7px; font-weight: 600; font-size: 13px; }
+.t-T { --c: var(--tank); } .t-A { --c: var(--air); } .t-M { --c: var(--msl); } .t-X { --c: var(--mix); }
+.order { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.order .arr { width: 10px; height: 10px; border-top: 2px solid var(--muted); border-right: 2px solid var(--muted); transform: rotate(45deg) scale(.6); flex: none; }
+.order.big { gap: 6px; }
+.order.big .chip b { font-size: 15px; padding: 6px 9px; }
+.order.big .chip span { font-size: 18px; padding: 5px 10px; }
+.minis { display: inline-flex; gap: 2px; }
+.mini { --c: var(--mix); display: inline-block; width: 18px; height: 18px; border-radius: 4px; background: var(--c); color: var(--chip-ink); font-family: var(--cond); font-weight: 700; font-size: 11px; line-height: 18px; text-align: center; }
+
+/* next fight */
+.grid-next { display: grid; grid-template-columns: minmax(290px, 360px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.hero { border-left: 5px solid var(--accent); }
+.stamp { font-family: var(--display); font-weight: 800; font-size: 15px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); border: 2px solid currentColor; border-radius: 4px; padding: 1px 7px; transform: rotate(-2deg); display: inline-block; }
+.big-num { font-family: var(--display); font-weight: 800; font-size: 56px; line-height: .9; letter-spacing: .01em; }
+.big-row { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.big-row .cap { color: var(--muted); max-width: 32ch; padding-bottom: 6px; }
+.callout { font-size: 14px; }
+.foot { font-size: 13px; color: var(--muted); border-top: 1px dashed var(--line); padding-top: 10px; }
+
+.prow { display: grid; grid-template-columns: minmax(0, auto) minmax(60px, 1fr) 46px; gap: 10px; align-items: center; padding: 4px 0; }
+.prow.top { font-weight: 700; }
+.prow .pct { text-align: right; font-weight: 600; }
+.bar { height: 8px; background: color-mix(in oklab, var(--line) 70%, transparent); border-radius: 4px; overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.bar.muted i { background: var(--muted); }
+.tag { font-family: var(--cond); font-weight: 700; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; color: var(--muted); margin-left: 6px; white-space: nowrap; }
+.tag.hot { color: var(--accent); border-color: var(--accent); }
+.lead { font-size: 16px; }
+.rematch { border: 1px dashed var(--accent); border-radius: 8px; padding: 10px 12px; background: color-mix(in oklab, var(--accent) 7%, var(--panel)); display: flex; flex-direction: column; gap: 6px; }
+.rematch .tag { margin-left: 0; margin-right: 6px; }
+
+.tend { display: grid; grid-template-columns: minmax(130px, 210px) minmax(60px, 1fr) 42px; gap: 10px; align-items: center; font-size: 14px; }
+.tend .pct { text-align: right; }
+
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: middle; }
+th { font-family: var(--cond); font-weight: 700; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.scroll { overflow-x: auto; }
+.mx td.cell { text-align: center; font-weight: 600; min-width: 52px; }
+.mx th .p { display: block; font-family: var(--body); letter-spacing: 0; text-transform: none; font-weight: 600; color: var(--ink); }
+details > summary { cursor: pointer; font-family: var(--cond); font-weight: 700; font-size: 14px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+details[open] > summary { margin-bottom: 10px; }
+
+.pill { font-family: var(--cond); font-weight: 700; font-size: 12px; letter-spacing: .06em; padding: 1px 7px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.pill.w { color: var(--win); } .pill.l { color: var(--loss); }
+.ok { color: var(--win); } .bad { color: var(--loss); }
+
+/* opponents */
+.grid-opp { display: grid; grid-template-columns: minmax(250px, 320px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.plist { display: flex; flex-direction: column; gap: 2px; max-height: 70vh; overflow: auto; }
+.plist button { text-align: left; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 8px 10px; cursor: pointer; display: grid; gap: 4px; }
+.plist button:hover { background: var(--field); }
+.plist button[aria-current="true"] { background: var(--field); border-color: var(--accent); }
+.plist .nm { font-weight: 700; display: flex; justify-content: space-between; gap: 8px; }
+
+/* log */
+.sides { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.side { border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px; background: var(--field); }
+.side.won { border-color: var(--win); box-shadow: inset 0 0 0 1px var(--win); }
+.blist .b { display: grid; grid-template-columns: 54px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.blist .vs { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.blist .who { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.blist .rd { font-family: var(--display); font-weight: 800; font-size: 20px; color: var(--muted); }
+.blist .nm { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.stat { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.stat b { font-variant-numeric: tabular-nums; }
+.prose { max-width: 68ch; display: flex; flex-direction: column; gap: 10px; }
+.field { display: flex; flex-direction: column; gap: 5px; }
+.three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.empty { color: var(--muted); padding: 18px; border: 1px dashed var(--line); border-radius: 8px; text-align: center; }
+
+@media (max-width: 820px) {
+  .grid-next { display: flex; flex-direction: column; gap: 14px; align-items: stretch; }
+  .grid-next .col { display: contents; }
+  .c-opp { order: 1; } .c-hero { order: 2; } .c-pred { order: 3; } .c-you { order: 4; } .c-mix { order: 5; } .c-mx { order: 6; }
+  .grid-opp, .grid2 { grid-template-columns: minmax(0, 1fr); }
+  .plist { max-height: 260px; }
+  .sides { grid-template-columns: minmax(0, 1fr); }
+  .big-num { font-size: 48px; }
+  .three { grid-template-columns: minmax(0, 1fr); }
+  .tabs a { font-size: 14px; padding: 9px 9px 8px; }
+  /* 16px stops phones zooming in when a field is tapped */
+  input[type="text"], input:not([type]), select, textarea { font-size: 16px; }
+}
+@media (max-width: 420px) {
+  .brand h1 { font-size: 28px; }
+  .tend { grid-template-columns: minmax(110px, 1fr) 70px 40px; }
+  .prow { grid-template-columns: minmax(0, auto) 50px 42px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .bar i { transition: width .35s ease; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <h1>Duel Tracker</h1>
+      <span class="sub">Last War · Champion Duel qualifier scouting</span>
+    </div>
+    <span id="status" class="status" role="status">Connecting…</span>
+  </header>
+  <nav class="tabs" aria-label="Sections">
+    <a href="#next" data-view="next">Next fight</a>
+    <a href="#opponents" data-view="opponents">Opponents</a>
+    <a href="#log" data-view="log">Battle log</a>
+    <a href="#patterns" data-view="patterns">Patterns</a>
+    <a href="#setup" data-view="setup">Setup</a>
+  </nav>
+  <div id="notes"></div>
+  <main id="view"></main>
+  <datalist id="dl-players"></datalist>
+  <datalist id="dl-all"></datalist>
+</div>
+<script>
+/* Champion Duel engine: fight simulator, opponent behavior model, recommender.
+   Works in the browser (window.DuelEngine) and in Node (module.exports). */
+(function (root) {
+  'use strict';
+
+  var TYPES = ['T', 'A', 'M', 'X'];
+  var TYPE_NAME = { T: 'Tank', A: 'Aircraft', M: 'Missile', X: 'Mixed' };
+  var BEATS = { T: 'M', M: 'A', A: 'T' }; // key beats value
+  var PERMS = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+  var EXPERTS = ['habit', 'strongest', 'counter', 'wsls', 'double', 'random'];
+  var EXPERT_INFO = {
+    habit: { label: 'Creature of habit', blurb: 'Plays the order they used most recently.' },
+    strongest: { label: 'Strongest squad first', blurb: 'Leads with their highest-power squad, as most guides advise.' },
+    counter: { label: 'Counters what they see', blurb: "Picks the order that beats their opponent's last formation." },
+    wsls: { label: 'Keeps a win, changes a loss', blurb: 'Same order after a win; something different after a loss.' },
+    double: { label: 'Second-guesser', blurb: 'Expects to be countered, so counters the counter.' },
+    random: { label: 'Unpredictable', blurb: 'No pattern the model can find.' }
+  };
+  var REMATCH_INFO = { label: 'Remembers your last meeting', blurb: 'In a rematch, replays the order that beat you, or counters the order that beat them.' };
+  var RM_PRIOR = { a: 1, b: 2 }; // weak prior: about a third of rematch choices follow the last meeting
+  var DEFAULT_W = { habit: 0.40, strongest: 0.15, counter: 0.15, wsls: 0.12, double: 0.06, random: 0.12 };
+  var DEFAULTS = {
+    bonus: 0.04,     // counter edge on hero power when a squad's type beats the enemy's (fitted on 391 real encounters)
+    sigma: 0.03,     // spread of hidden strength around listed power (lognormal sd, per squad; fitted)
+    attr: 1.5,       // attrition exponent: how many troops a winner keeps (fitted on real survivor counts)
+    sims: 1500,      // simulations for the live matchup
+    fitSims: 120,    // simulations per matchup when learning from history
+    decay: 0.5,      // how fast older formations fade from a player's habit
+    prior: 3,        // how many fights of evidence the population pattern is worth for one player
+    popPrior: 2,     // pseudo-fights behind the default pattern for the population
+    tie: 0.015       // win-chance gap treated as a tie when finding best responses
+  };
+
+  /* ---------- small helpers ---------- */
+  function uniform6() { return [1 / 6, 1 / 6, 1 / 6, 1 / 6, 1 / 6, 1 / 6]; }
+  function onehot(k) { var a = [0, 0, 0, 0, 0, 0]; a[k] = 1; return a; }
+  function normalizeArr(a) {
+    var s = 0, i;
+    for (i = 0; i < a.length; i++) s += a[i];
+    if (!(s > 0)) return a.map(function () { return 1 / a.length; });
+    return a.map(function (v) { return v / s; });
+  }
+  function normalizeObj(o) {
+    var s = 0, k, out = {};
+    for (k in o) s += o[k];
+    for (k in o) out[k] = s > 0 ? o[k] / s : 1 / Object.keys(o).length;
+    return out;
+  }
+  function scaleObj(o, f) { var out = {}; for (var k in o) out[k] = o[k] * f; return out; }
+  function argmax(a) { var b = 0; for (var i = 1; i < a.length; i++) if (a[i] > a[b]) b = i; return b; }
+  function keyOf(name) { return String(name || '').trim().toLowerCase(); }
+
+  function normType(t) {
+    var s = String(t || '').trim().toUpperCase();
+    if (s.indexOf('MIX') === 0 || s === 'X') return 'X';
+    if (s.charAt(0) === 'T') return 'T';
+    if (s.charAt(0) === 'A' || s.indexOf('AIR') >= 0 || s.indexOf('PLANE') >= 0) return 'A';
+    if (s.charAt(0) === 'M' || s.indexOf('MISS') >= 0 || s.indexOf('ROCK') >= 0) return 'M';
+    return 'X';
+  }
+  function normPower(p) {
+    var v;
+    if (typeof p === 'number') v = p;
+    else {
+      var s = String(p == null ? '' : p).trim().replace(/[,\s]/g, '');
+      var mult = 1;
+      if (/k$/i.test(s)) { mult = 0.001; s = s.slice(0, -1); }
+      else if (/m$/i.test(s)) { s = s.slice(0, -1); }
+      else if (/b$/i.test(s)) { mult = 1000; s = s.slice(0, -1); }
+      v = parseFloat(s) * mult;
+    }
+    if (!isFinite(v) || v <= 0) return NaN;
+    if (v > 10000) v = v / 1e6; // raw numbers like 48,200,000 become millions
+    return Math.round(v * 100) / 100;
+  }
+  function normSquads(arr) {
+    if (!Array.isArray(arr) || arr.length !== 3) return null;
+    var out = arr.map(function (q) {
+      var o = { t: normType(q && (q.t || q.type)), p: normPower(q && (q.p != null ? q.p : q.power)) };
+      if (q && q.id != null && q.id !== '') o.id = String(q.id);
+      return o;
+    });
+    for (var i = 0; i < 3; i++) if (!isFinite(out[i].p)) return null;
+    return out;
+  }
+  // Optional per-side details from imported reports: alliance tag and server.
+  function sideOf(x, name, squads) {
+    var o = { name: name, s: squads };
+    if (x.al != null && String(x.al).trim()) o.al = String(x.al).trim();
+    if (x.sv != null && isFinite(+x.sv)) o.sv = +x.sv;
+    return o;
+  }
+  function normBattle(b) {
+    if (!b || !b.a || !b.b) return null;
+    var A = normSquads(b.a.s || b.a.squads), B = normSquads(b.b.s || b.b.squads);
+    var an = String(b.a.name || '').trim(), bn = String(b.b.name || '').trim();
+    var r = Number(b.round);
+    var w = b.win === 'a' || b.win === 'b' ? b.win : (b.winner === 'a' || b.winner === 'b' ? b.winner : null);
+    if (!A || !B || !an || !bn || !isFinite(r) || !w) return null;
+    var out = { id: b.id || null, round: r, a: sideOf(b.a, an, A), b: sideOf(b.b, bn, B), win: w, note: b.note || '', created: b.created || '' };
+    if (Array.isArray(b.e)) out.e = b.e;
+    if (b.g != null && String(b.g).trim()) out.g = String(b.g).trim();
+    return out;
+  }
+  function battleKey(b) {
+    var n = [keyOf(b.a.name), keyOf(b.b.name)].sort();
+    return b.round + '|' + n[0] + '|' + n[1];
+  }
+
+  /* ---------- squads, identities and orders ---------- */
+  function permIndex(arr) {
+    for (var k = 0; k < 6; k++) { var P = PERMS[k]; if (P[0] === arr[0] && P[1] === arr[1] && P[2] === arr[2]) return k; }
+    return 0;
+  }
+  // Canonical squad list: by type (T, A, M, X), then power high to low. Returns {canon, perm}.
+  function canonical(form) {
+    var idx = [0, 1, 2].sort(function (i, j) {
+      var ti = TYPES.indexOf(form[i].t), tj = TYPES.indexOf(form[j].t);
+      if (ti !== tj) return ti - tj;
+      return (form[j].p - form[i].p) || (i - j);
+    });
+    var canon = idx.map(function (i) { var q = { t: form[i].t, p: form[i].p }; if (form[i].id != null) q.id = form[i].id; return q; });
+    var slotToCanon = [0, 0, 0];
+    idx.forEach(function (slot, c) { slotToCanon[slot] = c; });
+    return { canon: canon, perm: permIndex(slotToCanon) };
+  }
+  // Which order of `canon` best explains a formation (handles small power changes between fights).
+  function matchPerm(form, canon) {
+    var best = 0, bestCost = Infinity;
+    for (var k = 0; k < 6; k++) {
+      var P = PERMS[k], c = 0;
+      for (var s = 0; s < 3; s++) {
+        var f = form[s], q = canon[P[s]];
+        if (f.id != null && q.id != null) c += f.id === q.id ? 0 : 100; // squad ids from battle reports are exact
+        c += (f.t === q.t ? 0 : 10) + Math.abs(Math.log(f.p / q.p));
+      }
+      if (c < bestCost - 1e-12) { bestCost = c; best = k; }
+    }
+    return best;
+  }
+  function orderSquads(canon, k) { return PERMS[k].map(function (c) { return canon[c]; }); }
+  function strongestIndex(canon) {
+    var m = Math.max(canon[0].p, canon[1].p, canon[2].p);
+    return [0, 1, 2].filter(function (c) { return canon[c].p >= m - 1e-9; });
+  }
+
+  /* ---------- random numbers (seeded, so results are stable) ---------- */
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  var noiseCache = {};
+  function getNoise(n, seed) {
+    var key = n + ':' + seed;
+    if (noiseCache[key]) return noiseCache[key];
+    var rnd = mulberry32(seed), z = new Float64Array(n * 6);
+    for (var i = 0; i < z.length; i += 2) {
+      var u = rnd(); if (u < 1e-12) u = 1e-12;
+      var v = rnd(), r = Math.sqrt(-2 * Math.log(u));
+      z[i] = r * Math.cos(2 * Math.PI * v);
+      z[i + 1] = r * Math.sin(2 * Math.PI * v);
+    }
+    noiseCache[key] = z;
+    return z;
+  }
+
+  /* ---------- fight simulator ---------- */
+  function counterMult(a, b, bonus) { return BEATS[a] === b ? 1 + bonus : 1; }
+  // One fight, as the game runs it (checked against 391 real encounters): each side sends its next
+  // squad; the winner goes to the back of its line with the troops it has left; the loser is out.
+  // The fight ends when one side has no squads left (3 to 5 encounters).
+  // Returns 1 if side A wins, 0 if B wins, 0.5 on a full mutual wipe.
+  function fight(PA, PB, SA, SB, mAB, mBA, k) {
+    var qa = [PA[0], PA[1], PA[2]], qb = [PB[0], PB[1], PB[2]], fa = [1, 1, 1], fb = [1, 1, 1], k2 = 2 * k;
+    while (qa.length && qb.length) {
+      var a = qa.shift(), b = qb.shift();
+      var ea = SA[a] * fa[a] * mAB[a][b], eb = SB[b] * fb[b] * mBA[b][a];
+      if (ea > eb) { fa[a] *= Math.pow(1 - Math.pow(eb / ea, k2), 1 / k2); qa.push(a); }
+      else if (eb > ea) { fb[b] *= Math.pow(1 - Math.pow(ea / eb, k2), 1 / k2); qb.push(b); }
+    }
+    return qa.length ? 1 : (qb.length ? 0 : 0.5);
+  }
+  function multTables(A, B, bonus) {
+    var mAB = [[], [], []], mBA = [[], [], []];
+    for (var a = 0; a < 3; a++) for (var b = 0; b < 3; b++) {
+      mAB[a][b] = counterMult(A[a].t, B[b].t, bonus);
+      mBA[b][a] = counterMult(B[b].t, A[a].t, bonus);
+    }
+    return { mAB: mAB, mBA: mBA };
+  }
+  var matCache = {}, matCacheSize = 0;
+  // 6x6 matrix: chance side A wins when A plays order i and B plays order j (orders of the canonical lists).
+  function winMatrix(A, B, opt) {
+    var bonus = opt.bonus, sigma = opt.sigma, n = opt.n || opt.sims, attr = opt.attr || DEFAULTS.attr;
+    var key = JSON.stringify([A, B, bonus, sigma, n, attr]);
+    if (matCache[key]) return matCache[key];
+    var z = getNoise(n, 777), t = multTables(A, B, bonus);
+    var wins = new Float64Array(36), SA = new Float64Array(3), SB = new Float64Array(3);
+    for (var s = 0; s < n; s++) {
+      var off = s * 6;
+      for (var c = 0; c < 3; c++) {
+        SA[c] = A[c].p * Math.exp(sigma * z[off + c]);
+        SB[c] = B[c].p * Math.exp(sigma * z[off + 3 + c]);
+      }
+      for (var i = 0; i < 6; i++) for (var j = 0; j < 6; j++) wins[i * 6 + j] += fight(PERMS[i], PERMS[j], SA, SB, t.mAB, t.mBA, attr);
+    }
+    var M = [];
+    for (var i2 = 0; i2 < 6; i2++) { var row = []; for (var j2 = 0; j2 < 6; j2++) row.push(wins[i2 * 6 + j2] / n); M.push(row); }
+    if (matCacheSize > 2000) { matCache = {}; matCacheSize = 0; }
+    matCache[key] = M; matCacheSize++;
+    return M;
+  }
+  function flipMatrix(W) { // from the other side's point of view
+    var M = [];
+    for (var i = 0; i < 6; i++) { var row = []; for (var j = 0; j < 6; j++) row.push(1 - W[j][i]); M.push(row); }
+    return M;
+  }
+  // Chance A wins one specific order pair (used for calibration).
+  function winProb(A, B, ka, kb, bonus, sigma, n, attr) {
+    var z = getNoise(n, 4242), t = multTables(A, B, bonus), SA = new Float64Array(3), SB = new Float64Array(3), w = 0;
+    for (var s = 0; s < n; s++) {
+      var off = s * 6;
+      for (var c = 0; c < 3; c++) { SA[c] = A[c].p * Math.exp(sigma * z[off + c]); SB[c] = B[c].p * Math.exp(sigma * z[off + 3 + c]); }
+      w += fight(PERMS[ka], PERMS[kb], SA, SB, t.mAB, t.mBA, attr || DEFAULTS.attr);
+    }
+    return w / n;
+  }
+
+  /* ---------- game theory ---------- */
+  function rowEV(W, colDist) { return W.map(function (row) { var s = 0; for (var j = 0; j < 6; j++) s += row[j] * colDist[j]; return s; }); }
+  function colEV(W, rowDist) { var out = []; for (var j = 0; j < 6; j++) { var s = 0; for (var i = 0; i < 6; i++) s += rowDist[i] * W[i][j]; out.push(s); } return out; }
+  function bestResponse(W, colDist, tie) { // row player maximizing
+    var ev = rowEV(W, colDist), mx = Math.max.apply(null, ev);
+    return normalizeArr(ev.map(function (v) { return v >= mx - tie ? 1 : 0; }));
+  }
+  function minResponse(W, rowDist, tie) { // column player minimizing the row player's win chance
+    var ev = colEV(W, rowDist), mn = Math.min.apply(null, ev);
+    return normalizeArr(ev.map(function (v) { return v <= mn + tie ? 1 : 0; }));
+  }
+  // Safe mix for a zero-sum matrix game (row maximizes): regret matching+ with linear averaging.
+  function solveZeroSum(W, iters) {
+    iters = iters || 3000;
+    var n = W.length, m = W[0].length, Rr = new Float64Array(n), Rc = new Float64Array(m), Sr = new Float64Array(n), Sc = new Float64Array(m);
+    var x = new Array(n).fill(1 / n), y = new Array(m).fill(1 / m), i, j;
+    function pos(R) { var s = 0, k; for (k = 0; k < R.length; k++) s += R[k]; var o = []; for (k = 0; k < R.length; k++) o.push(s > 0 ? R[k] / s : 1 / R.length); return o; }
+    for (var t = 1; t <= iters; t++) {
+      var ur = rowEV(W, y), vr = 0;
+      for (i = 0; i < n; i++) vr += x[i] * ur[i];
+      for (i = 0; i < n; i++) Rr[i] = Math.max(0, Rr[i] + ur[i] - vr);
+      x = pos(Rr);
+      var uc = colEV(W, x), vc = 0;
+      for (j = 0; j < m; j++) vc += y[j] * uc[j];
+      for (j = 0; j < m; j++) Rc[j] = Math.max(0, Rc[j] + vc - uc[j]);
+      y = pos(Rc);
+      for (i = 0; i < n; i++) Sr[i] += t * x[i];
+      for (j = 0; j < m; j++) Sc[j] += t * y[j];
+    }
+    var row = normalizeArr(Array.prototype.slice.call(Sr)), col = normalizeArr(Array.prototype.slice.call(Sc));
+    // tidy: drop slivers under 2% so the mix is usable
+    var tidy = normalizeArr(row.map(function (v) { return v < 0.02 ? 0 : v; }));
+    var guaranteed = Math.min.apply(null, colEV(W, tidy));
+    return { row: tidy, rawRow: row, col: col, value: guaranteed };
+  }
+
+  /* ---------- behavior experts ---------- */
+  function habitDist(perms, decay) {
+    var a = [0, 0, 0, 0, 0, 0], w = 1;
+    for (var i = perms.length - 1; i >= 0; i--) { a[perms[i]] += w; w *= decay; }
+    return normalizeArr(a);
+  }
+  function strongestDist(canon) {
+    var S = strongestIndex(canon);
+    return normalizeArr(PERMS.map(function (P) { return S.indexOf(P[0]) >= 0 ? 1 : 0; }));
+  }
+  function spreadExcept(k) { var a = [0.2, 0.2, 0.2, 0.2, 0.2, 0.2]; a[k] = 0; return a; }
+  // ctx: {canon, prevPerms, lastResult ('W'|'L'|null), W (this player vs opponent), oppHabit}
+  function expertDists(ctx, opt) {
+    var U = uniform6(), d = {};
+    var hasPrev = ctx.prevPerms.length > 0;
+    var h = hasPrev ? habitDist(ctx.prevPerms, opt.decay) : null;
+    d.habit = h || U;
+    d.strongest = strongestDist(ctx.canon);
+    d.counter = ctx.W && ctx.oppHabit ? bestResponse(ctx.W, ctx.oppHabit, opt.tie) : U;
+    if (hasPrev) {
+      var last = ctx.prevPerms[ctx.prevPerms.length - 1];
+      d.wsls = ctx.lastResult === 'W' ? onehot(last) : (ctx.lastResult === 'L' ? spreadExcept(last) : U);
+      d.double = ctx.W ? bestResponse(ctx.W, minResponse(ctx.W, h, opt.tie), opt.tie) : U;
+    } else { d.wsls = U; d.double = U; }
+    d.random = U;
+    return d;
+  }
+  function mixDists(d, w) {
+    var p = [0, 0, 0, 0, 0, 0];
+    for (var e = 0; e < EXPERTS.length; e++) { var E = EXPERTS[e]; for (var k = 0; k < 6; k++) p[k] += w[E] * d[E][k]; }
+    return normalizeArr(p);
+  }
+  // Learn how much each expert explains a player's choices (EM with pseudo-count prior).
+  function fitWeights(obs, priorCounts, iters) {
+    iters = iters || 80;
+    var w = normalizeObj(priorCounts);
+    if (!obs.length) return w;
+    for (var it = 0; it < iters; it++) {
+      var R = Object.assign({}, priorCounts);
+      for (var o = 0; o < obs.length; o++) {
+        var ob = obs[o], den = 0, e;
+        for (e = 0; e < EXPERTS.length; e++) den += w[EXPERTS[e]] * ob.d[EXPERTS[e]][ob.perm];
+        if (!(den > 0)) continue;
+        for (e = 0; e < EXPERTS.length; e++) R[EXPERTS[e]] += w[EXPERTS[e]] * ob.d[EXPERTS[e]][ob.perm] / den;
+      }
+      w = normalizeObj(R);
+    }
+    return w;
+  }
+
+  /* ---------- building the model from battle reports ---------- */
+  function buildIndex(battles) {
+    var seen = {}, list = [];
+    battles.forEach(function (raw) {
+      var b = normBattle(raw);
+      if (!b) return;
+      var k = battleKey(b);
+      // Two copies of one fight: keep the one that knows its group (a newer import).
+      if (seen[k]) { if (!seen[k].b.g && b.g) { list[seen[k].i] = b; seen[k].b = b; } return; }
+      seen[k] = { i: list.length, b: b };
+      list.push(b);
+    });
+    list.sort(function (x, y) { return x.round - y.round; });
+    var players = {};
+    list.forEach(function (b) {
+      ['a', 'b'].forEach(function (side) {
+        var me = b[side], op = b[side === 'a' ? 'b' : 'a'], k = keyOf(me.name);
+        if (!players[k]) players[k] = { key: k, name: me.name, entries: [] };
+        var P = players[k];
+        P.name = me.name;
+        if (b.g) P.g = b.g;
+        if (me.al) P.al = me.al;
+        if (me.sv != null) P.sv = me.sv;
+        players[k].entries.push({ round: b.round, form: me.s, oppKey: keyOf(op.name), oppName: op.name, oppForm: op.s, won: b.win === side, battleId: b.id });
+      });
+    });
+    return { battles: list, players: players };
+  }
+  // What a player could see of an opponent before round r: the opponent's formations from earlier rounds.
+  function seenOf(index, oppKey, round, fallbackForm, decay) {
+    var op = index.players[oppKey];
+    var prev = op ? op.entries.filter(function (e) { return e.round < round; }) : [];
+    if (prev.length) {
+      var canon = canonical(prev[prev.length - 1].form).canon;
+      return { canon: canon, habit: habitDist(prev.map(function (e) { return matchPerm(e.form, canon); }), decay), proxy: false, lastForm: prev[prev.length - 1].form };
+    }
+    var c = canonical(fallbackForm);
+    return { canon: c.canon, habit: onehot(c.perm), proxy: true, lastForm: fallbackForm };
+  }
+  function makeObs(index, pl, t, opt) {
+    var e = pl.entries[t], c = canonical(e.form);
+    var prev = pl.entries.filter(function (x) { return x.round < e.round; });
+    var prevPerms = prev.map(function (x) { return matchPerm(x.form, c.canon); });
+    var lastResult = prev.length ? (prev[prev.length - 1].won ? 'W' : 'L') : null;
+    var seen = seenOf(index, e.oppKey, e.round, e.oppForm, opt.decay);
+    var W = winMatrix(c.canon, seen.canon, { bonus: opt.bonus, sigma: opt.sigma, attr: opt.attr, n: opt.fitSims });
+    var d = expertDists({ canon: c.canon, prevPerms: prevPerms, lastResult: lastResult, W: W, oppHabit: seen.habit }, opt);
+    // rematch: the latest earlier fight against this same opponent
+    var meet = null;
+    for (var i = prev.length - 1; i >= 0; i--) if (prev[i].oppKey === e.oppKey) { meet = prev[i]; break; }
+    var rm = null;
+    if (meet) {
+      var selfPerm = matchPerm(meet.form, c.canon), oppPerm = matchPerm(meet.oppForm, seen.canon);
+      rm = { round: meet.round, selfPerm: selfPerm, oppPerm: oppPerm, won: meet.won, form: meet.form, oppForm: meet.oppForm, d: rematchDist(selfPerm, oppPerm, meet.won, W, opt.tie) };
+    }
+    return { player: pl.key, round: e.round, perm: c.perm, canon: c.canon, prevPerms: prevPerms, lastResult: lastResult, won: e.won, oppName: e.oppName, seen: seen, d: d, rm: rm };
+  }
+  // In a rematch: replay the order that won last time, or counter the order that beat them.
+  function rematchDist(selfPerm, oppPerm, wonLast, W, tie) {
+    return wonLast ? onehot(selfPerm) : bestResponse(W, onehot(oppPerm), tie);
+  }
+  function blend(r, dRm, base) { return base.map(function (v, k) { return r * dRm[k] + (1 - r) * v; }); }
+  function fullDist(o, w, r) { var base = mixDists(o.d, w); return o.rm ? blend(r, o.rm.d, base) : base; }
+  // How often rematch choices follow the last meeting (one-parameter EM with a beta prior).
+  function fitRematch(obs, wOf, a, b, iters) {
+    var r = a / (a + b), list = obs.filter(function (o) { return o.rm; });
+    if (!list.length) return { r: r, n: 0 };
+    var base = list.map(function (o) { return mixDists(o.d, wOf(o))[o.perm]; });
+    for (var it = 0; it < (iters || 60); it++) {
+      var s = 0;
+      for (var i = 0; i < list.length; i++) {
+        var num = r * list[i].rm.d[list[i].perm], den = num + (1 - r) * base[i];
+        if (den > 0) s += num / den;
+      }
+      r = (a + s) / (a + b + list.length);
+    }
+    return { r: r, n: list.length };
+  }
+  function buildModel(battles, settings) {
+    var opt = Object.assign({}, DEFAULTS, settings || {});
+    ['bonus', 'sigma', 'attr'].forEach(function (k) { opt[k] = Number(opt[k]); if (!isFinite(opt[k]) || opt[k] <= 0 && k !== 'bonus') opt[k] = DEFAULTS[k]; });
+    var index = buildIndex(battles || []);
+    var meKey = keyOf(opt.me);
+    var obsBy = {}, pop = [];
+    Object.keys(index.players).forEach(function (k) {
+      var pl = index.players[k];
+      obsBy[k] = pl.entries.map(function (_, t) { return makeObs(index, pl, t, opt); });
+      if (k !== meKey) pop = pop.concat(obsBy[k]);
+    });
+    var popW = fitWeights(pop, scaleObj(DEFAULT_W, opt.popPrior));
+    var playerW = {};
+    Object.keys(obsBy).forEach(function (k) { playerW[k] = fitWeights(obsBy[k], scaleObj(popW, opt.prior)); });
+    var popRm = fitRematch(pop, function (o) { return playerW[o.player]; }, RM_PRIOR.a, RM_PRIOR.b);
+    var playerRm = {};
+    Object.keys(obsBy).forEach(function (k) {
+      playerRm[k] = fitRematch(obsBy[k], function () { return playerW[k]; }, opt.prior * popRm.r, opt.prior * (1 - popRm.r));
+    });
+    return { opt: opt, index: index, obsBy: obsBy, popW: popW, playerW: playerW, popRm: popRm, playerRm: playerRm, meKey: meKey, popN: pop.length };
+  }
+
+  /* ---------- track record: predict each past fight using only what came before ---------- */
+  function walkForward(model, onlyKey) {
+    var res = { n: 0, hits: 0, sumP: 0, repeatN: 0, repeatHits: 0, rmN: 0, rmHits: 0, calls: {} };
+    var pa = model.opt.prior * model.popRm.r, pb = model.opt.prior * (1 - model.popRm.r);
+    Object.keys(model.obsBy).forEach(function (k) {
+      if (onlyKey ? k !== onlyKey : k === model.meKey) return;
+      var list = model.obsBy[k];
+      res.calls[k] = [];
+      for (var t = 0; t < list.length; t++) {
+        if (t === 0) { res.calls[k].push(null); continue; }
+        var train = list.slice(0, t);
+        var w = fitWeights(train, scaleObj(model.popW, model.opt.prior), 40);
+        var r = fitRematch(train, function () { return w; }, pa, pb, 30).r;
+        var p = fullDist(list[t], w, r), top = argmax(p), hit = top === list[t].perm;
+        res.n++; if (hit) res.hits++; res.sumP += p[list[t].perm];
+        if (list[t].rm) { res.rmN++; if (hit) res.rmHits++; }
+        var last = list[t].prevPerms[list[t].prevPerms.length - 1];
+        res.repeatN++; if (last === list[t].perm) res.repeatHits++;
+        res.calls[k].push({ top: top, hit: hit, p: p[list[t].perm] });
+      }
+    });
+    res.acc = res.n ? res.hits / res.n : null;
+    res.avgP = res.n ? res.sumP / res.n : null;
+    res.repeatAcc = res.repeatN ? res.repeatHits / res.repeatN : null;
+    return res;
+  }
+
+  /* ---------- plain-language habits for a set of observations ---------- */
+  function habitStats(obs) {
+    var s = { n: obs.length, withPrev: 0, kept: 0, afterWin: 0, keptAfterWin: 0, afterLoss: 0, keptAfterLoss: 0, countered: 0, counterChance: 0, strongestFirst: 0,
+      rematch: 0, rmWonPrev: 0, rmReplayed: 0, rmLostPrev: 0, rmCountered: 0 };
+    obs.forEach(function (o) {
+      if (o.rm) {
+        s.rematch++;
+        if (o.rm.won) { s.rmWonPrev++; if (o.perm === o.rm.selfPerm) s.rmReplayed++; }
+        else { s.rmLostPrev++; if (o.rm.d[o.perm] > 0) s.rmCountered++; }
+      }
+      var lead = PERMS[o.perm][0];
+      if (strongestIndex(o.canon).indexOf(lead) >= 0) s.strongestFirst++;
+      if (o.d.counter[o.perm] > 0) s.countered++;
+      s.counterChance += o.d.counter.filter(function (v) { return v > 0; }).length / 6;
+      if (!o.prevPerms.length) return;
+      s.withPrev++;
+      var keep = o.prevPerms[o.prevPerms.length - 1] === o.perm;
+      if (keep) s.kept++;
+      if (o.lastResult === 'W') { s.afterWin++; if (keep) s.keptAfterWin++; }
+      if (o.lastResult === 'L') { s.afterLoss++; if (keep) s.keptAfterLoss++; }
+    });
+    return s;
+  }
+
+  /* ---------- the live call: predict an opponent and pick your order ---------- */
+  // q: {opp (name), oppForm (their last formation in slot order, optional override), oppLastResult ('W'|'L'|null, optional),
+  //     myForm (your squads in your current slot order), myShown (formation they will see; defaults to your latest logged)}
+  function predict(model, q) {
+    var opt = model.opt, k = keyOf(q.opp), pl = model.index.players[k];
+    var entries = pl ? pl.entries : [];
+    var latest = entries.length ? entries[entries.length - 1] : null;
+    var oppForm = q.oppForm || (latest && latest.form);
+    if (!oppForm || !q.myForm) return null;
+    var c = canonical(oppForm);
+    var prevPerms = entries.map(function (e) { return matchPerm(e.form, c.canon); });
+    var lastResult = latest ? (latest.won ? 'W' : 'L') : null;
+    var extra = q.oppForm && (!latest || !sameForm(q.oppForm, latest.form));
+    if (extra) { prevPerms.push(c.perm); lastResult = q.oppLastResult || null; }
+    else if (q.oppLastResult) lastResult = q.oppLastResult;
+
+    var mc = canonical(q.myForm);
+    var mine = model.index.players[model.meKey];
+    var myPerms = mine ? mine.entries.map(function (e) { return matchPerm(e.form, mc.canon); }) : [];
+    var shown = q.myShown || (mine && mine.entries.length ? mine.entries[mine.entries.length - 1].form : q.myForm);
+    var shownPerm = matchPerm(shown, mc.canon);
+    if (!myPerms.length || myPerms[myPerms.length - 1] !== shownPerm) myPerms.push(shownPerm);
+    var myHabit = habitDist(myPerms, opt.decay);
+
+    var W = winMatrix(c.canon, mc.canon, { bonus: opt.bonus, sigma: opt.sigma, attr: opt.attr, n: opt.sims }); // their view
+    var d = expertDists({ canon: c.canon, prevPerms: prevPerms, lastResult: lastResult, W: W, oppHabit: myHabit }, opt);
+    var w = pl ? model.playerW[k] : model.popW;
+    var p = mixDists(d, w);
+    // rematch: what happened the last time this player met you
+    var meet = null, rm = null;
+    if (model.meKey) for (var i = entries.length - 1; i >= 0; i--) if (entries[i].oppKey === model.meKey) { meet = entries[i]; break; }
+    if (meet) {
+      var rr = pl ? model.playerRm[k] : model.popRm;
+      var dRm = rematchDist(matchPerm(meet.form, c.canon), matchPerm(meet.oppForm, mc.canon), meet.won, W, opt.tie);
+      rm = { round: meet.round, theirForm: meet.form, myForm: meet.oppForm, theyWon: meet.won, r: rr.r, n: rr.n, d: dRm };
+      p = blend(rr.r, dRm, p);
+    }
+    var Wme = flipMatrix(W); // your view: rows = your orders, cols = their orders
+    var ev = rowEV(Wme, p);
+    var worst = Wme.map(function (row) { return Math.min.apply(null, row); });
+    var worstAgainst = Wme.map(function (row) { return argmax(row.map(function (v) { return -v; })); });
+    var nash = solveZeroSum(Wme);
+    var ranked = [0, 1, 2, 3, 4, 5].sort(function (a, b) { return ev[b] - ev[a] || worst[b] - worst[a]; });
+    return {
+      known: !!pl, nFights: entries.length, extraSeen: !!extra, lastResult: lastResult,
+      theirCanon: c.canon, theirLastPerm: prevPerms.length ? prevPerms[prevPerms.length - 1] : null,
+      myCanon: mc.canon, shownPerm: shownPerm, myCurrentPerm: mc.perm,
+      p: p, weights: w, experts: d, rematch: rm, Wme: Wme, ev: ev, worst: worst, worstAgainst: worstAgainst,
+      nash: nash, ranked: ranked, best: ranked[0]
+    };
+  }
+  function sameForm(f, g) {
+    if (!f || !g) return false;
+    for (var i = 0; i < 3; i++) if (f[i].t !== g[i].t || Math.abs(f[i].p - g[i].p) > 0.05) return false;
+    return true;
+  }
+
+  /* ---------- tuning the simulator to your reports ---------- */
+  function phi(x) { // standard normal CDF
+    var t = 1 / (1 + 0.2316419 * Math.abs(x)), d = 0.3989423 * Math.exp(-x * x / 2);
+    var p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+    return x > 0 ? 1 - p : p;
+  }
+  // Encounter rows from battles that carry report detail: e = [[aId, bId, winner, aBefore, aAfter, bBefore, bAfter], ...]
+  function encounterRows(list) {
+    var rows = [];
+    list.forEach(function (b) {
+      if (!Array.isArray(b.e) || !b.e.length) return;
+      var sq = { a: {}, b: {} }, max = { a: {}, b: {} };
+      ['a', 'b'].forEach(function (sd) { b[sd].s.forEach(function (q, i) { sq[sd][q.id != null ? q.id : String(i)] = q; }); });
+      b.e.forEach(function (x) {
+        var ia = String(x[0]), ib = String(x[1]), qa = sq.a[ia], qb = sq.b[ib];
+        if (!qa || !qb) return;
+        if (max.a[ia] == null) max.a[ia] = x[3];
+        if (max.b[ib] == null) max.b[ib] = x[5];
+        if (!(max.a[ia] > 0) || !(max.b[ib] > 0)) return;
+        rows.push({ ta: qa.t, tb: qb.t, pa: qa.p, pb: qb.p, fa: x[3] / max.a[ia], fb: x[5] / max.b[ib], aWon: x[2] === 'a',
+          fa2: x[4] / max.a[ia], fb2: x[6] / max.b[ib] });
+      });
+    });
+    return rows;
+  }
+  function calibrate(battles, settings) {
+    var idx = buildIndex(battles), enc = encounterRows(idx.battles);
+    var cur = { bonus: Number(settings.bonus != null ? settings.bonus : DEFAULTS.bonus), sigma: Number(settings.sigma != null ? settings.sigma : DEFAULTS.sigma), attr: Number(settings.attr || DEFAULTS.attr) };
+    if (enc.length >= 30) {
+      var best = null;
+      [0, 0.01, 0.02, 0.03, 0.035, 0.04, 0.05, 0.07, 0.1, 0.15, 0.2].forEach(function (bo) {
+        [0.01, 0.02, 0.03, 0.04, 0.05, 0.07, 0.1, 0.15].forEach(function (si) {
+          var ll = 0, hit = 0;
+          enc.forEach(function (r) {
+            var D = Math.log(r.fa * r.pa * counterMult(r.ta, r.tb, bo)) - Math.log(r.fb * r.pb * counterMult(r.tb, r.ta, bo));
+            var p = Math.min(0.999, Math.max(0.001, phi(D / (si * Math.SQRT2))));
+            ll += Math.log(r.aWon ? p : 1 - p); if ((D > 0) === r.aWon) hit++;
+          });
+          if (!best || ll > best.ll) best = { bonus: bo, sigma: si, ll: ll, acc: hit / enc.length };
+        });
+      });
+      var bestAttr = DEFAULTS.attr, bestErr = Infinity;
+      [1, 1.25, 1.5, 1.75, 2, 2.5].forEach(function (k) {
+        var se = 0, n = 0;
+        enc.forEach(function (r) {
+          var ea = r.fa * r.pa * counterMult(r.ta, r.tb, best.bonus), eb = r.fb * r.pb * counterMult(r.tb, r.ta, best.bonus);
+          if ((ea > eb) !== r.aWon) return;
+          var rho = Math.min(0.999, r.aWon ? eb / ea : ea / eb), fw = r.aWon ? r.fa : r.fb, obs = r.aWon ? r.fa2 : r.fb2;
+          se += Math.pow(fw * Math.pow(1 - Math.pow(rho, 2 * k), 1 / (2 * k)) - obs, 2); n++;
+        });
+        if (n && se / n < bestErr) { bestErr = se / n; bestAttr = k; }
+      });
+      return { level: 'encounter', n: enc.length, battles: idx.battles.length, best: { bonus: best.bonus, sigma: best.sigma, attr: bestAttr }, accuracy: best.acc, current: cur };
+    }
+    var rows = [];
+    idx.battles.forEach(function (b) {
+      var ca = canonical(b.a.s), cb = canonical(b.b.s);
+      rows.push({ A: ca.canon, B: cb.canon, ka: ca.perm, kb: cb.perm, aWon: b.win === 'a' });
+    });
+    if (rows.length < 8) return null;
+    var n = 400, bestB = null;
+    function llB(bonus, sigma) {
+      var s = 0;
+      rows.forEach(function (r) {
+        var p = Math.min(0.98, Math.max(0.02, winProb(r.A, r.B, r.ka, r.kb, bonus, sigma, n, cur.attr)));
+        s += Math.log(r.aWon ? p : 1 - p);
+      });
+      return s / rows.length;
+    }
+    [0, 0.02, 0.035, 0.05, 0.1, 0.2].forEach(function (bo) {
+      [0.02, 0.03, 0.05, 0.08, 0.12, 0.2].forEach(function (si) {
+        var v = llB(bo, si);
+        if (!bestB || v > bestB.ll + 1e-9) bestB = { bonus: bo, sigma: si, ll: v };
+      });
+    });
+    var acc = 0;
+    rows.forEach(function (r) { if ((winProb(r.A, r.B, r.ka, r.kb, bestB.bonus, bestB.sigma, n, cur.attr) >= 0.5) === r.aWon) acc++; });
+    return { level: 'battle', n: rows.length, battles: rows.length, best: { bonus: bestB.bonus, sigma: bestB.sigma, attr: cur.attr }, accuracy: acc / rows.length, current: cur };
+  }
+
+  /* ---------- example data: a small qualifier with players of known habits ---------- */
+  function exampleData(seed) {
+    var rnd = mulberry32(seed || 2026);
+    var names = ['IronWolf', 'Kestrel', 'NovaRex', 'Brigadier_K', 'SaltLake', 'Vortex77', 'Maple', 'Odin'];
+    var styles = ['habit', 'counter', 'wsls', 'strongest', 'habit', 'double', 'counter', 'random'];
+    var you = 'You (example)';
+    function rpow(base) { return Math.round((base * (0.8 + rnd() * 0.4)) * 10) / 10; }
+    function makeSquads(base) {
+      var order = ['T', 'A', 'M'].sort(function () { return rnd() - 0.5; });
+      return [{ t: order[0], p: rpow(base * 1.12) }, { t: order[1], p: rpow(base) }, { t: order[2], p: rpow(base * 0.88) }];
+    }
+    var memory = { 0: true, 1: true, 3: true, 5: true };
+    var players = names.map(function (nm, i) { return { name: '[Example] ' + nm, style: styles[i], memory: !!memory[i], squads: makeSquads(44 + rnd() * 10), hist: [] }; });
+    players.push({ name: you, style: 'habit', memory: false, squads: [{ t: 'T', p: 52.4 }, { t: 'A', p: 47.9 }, { t: 'M', p: 41.6 }], hist: [] });
+    var opt = Object.assign({}, DEFAULTS, { n: 300 });
+    function pick(pl, op) {
+      var c = canonical(pl.squads), last = pl.hist.length ? pl.hist[pl.hist.length - 1] : null;
+      var oc = canonical(op.squads);
+      var oppLast = op.hist.length ? matchPerm(op.hist[op.hist.length - 1].form, oc.canon) : null;
+      var W = winMatrix(c.canon, oc.canon, opt);
+      var lastPerm = last ? matchPerm(last.form, c.canon) : null;
+      var choice;
+      var r = rnd();
+      function sample(dist) { var x = rnd(), s = 0; for (var k = 0; k < 6; k++) { s += dist[k]; if (x <= s) return k; } return 5; }
+      var meet = null;
+      for (var h = pl.hist.length - 1; h >= 0; h--) if (pl.hist[h].opp === op.name) { meet = pl.hist[h]; break; }
+      if (meet && pl.memory && rnd() < 0.75) {
+        return orderSquads(c.canon, sample(rematchDist(matchPerm(meet.form, c.canon), matchPerm(meet.oppForm, oc.canon), meet.won, W, 0.015)));
+      }
+      if (pl.style === 'random' || r < 0.1) choice = Math.floor(rnd() * 6);
+      else if (lastPerm == null) choice = sample(strongestDist(c.canon));
+      else if (pl.style === 'habit') choice = lastPerm;
+      else if (pl.style === 'strongest') choice = sample(strongestDist(c.canon));
+      else if (pl.style === 'wsls') choice = last.won ? lastPerm : sample(spreadExcept(lastPerm));
+      else if (pl.style === 'counter') choice = oppLast == null ? lastPerm : sample(bestResponse(W, onehot(oppLast), 0.015));
+      else if (pl.style === 'double') {
+        var h = onehot(lastPerm); choice = sample(bestResponse(W, minResponse(W, h, 0.015), 0.015));
+      }
+      return orderSquads(c.canon, choice);
+    }
+    var battles = [], rounds = 8;
+    for (var round = 1; round <= rounds; round++) {
+      var pool = players.slice().sort(function () { return rnd() - 0.5; });
+      for (var i = 0; i + 1 < pool.length; i += 2) {
+        var A = pool[i], B = pool[i + 1];
+        var fa = pick(A, B), fb = pick(B, A);
+        var ca = canonical(fa), cb = canonical(fb);
+        var pa = winMatrix(ca.canon, cb.canon, opt)[ca.perm][cb.perm];
+        var aWon = rnd() < pa;
+        battles.push({ id: 'ex' + round + '_' + i, round: round, a: { name: A.name, s: fa }, b: { name: B.name, s: fb }, win: aWon ? 'a' : 'b', note: 'example' });
+        A.hist.push({ form: fa, won: aWon, opp: B.name, oppForm: fb }); B.hist.push({ form: fb, won: !aWon, opp: A.name, oppForm: fa });
+      }
+      // the odd player out sits this round
+    }
+    var youPl = players[players.length - 1];
+    var lastYou = youPl.hist.length ? youPl.hist[youPl.hist.length - 1].form : youPl.squads;
+    return { battles: battles, me: you, myForm: lastYou, styles: players.map(function (p) { return { name: p.name, style: p.style }; }) };
+  }
+
+  var api = {
+    TYPES: TYPES, TYPE_NAME: TYPE_NAME, BEATS: BEATS, PERMS: PERMS, EXPERTS: EXPERTS, EXPERT_INFO: EXPERT_INFO, REMATCH_INFO: REMATCH_INFO,
+    rematchDist: rematchDist, fitRematch: fitRematch, fullDist: fullDist, blend: blend,
+    DEFAULT_W: DEFAULT_W, DEFAULTS: DEFAULTS,
+    normType: normType, normPower: normPower, normSquads: normSquads, normBattle: normBattle, battleKey: battleKey, keyOf: keyOf,
+    canonical: canonical, matchPerm: matchPerm, orderSquads: orderSquads, strongestIndex: strongestIndex,
+    winMatrix: winMatrix, flipMatrix: flipMatrix, winProb: winProb, solveZeroSum: solveZeroSum,
+    bestResponse: bestResponse, minResponse: minResponse, habitDist: habitDist, expertDists: expertDists, mixDists: mixDists,
+    fitWeights: fitWeights, buildIndex: buildIndex, buildModel: buildModel, walkForward: walkForward, habitStats: habitStats,
+    predict: predict, sameForm: sameForm, calibrate: calibrate, encounterRows: encounterRows, exampleData: exampleData, argmax: argmax, mulberry32: mulberry32
+  };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  else root.DuelEngine = api;
+})(typeof window !== 'undefined' ? window : this);
+
+</script>
+<script>
+(() => {
+  'use strict';
+  const E = window.DuelEngine;
+  const VIEWS = ['next', 'opponents', 'log', 'patterns', 'setup'];
+  const DEF_SHARED = { me: 'Sammyboy99', bonus: 0.04, sigma: 0.03, attr: 1.5, sims: 1500 };
+  const DEF_PERSONAL = { me: '', myForm: null };
+  const LS_ME = 'lw-duel-tracker-me-v1';
+  const LS = 'lw-duel-tracker-v1';
+  const TS = { T: 'TNK', A: 'AIR', M: 'MSL', X: 'MIX' };
+
+  const S = {
+    battles: [], shared: Object.assign({}, DEF_SHARED), personal: Object.assign({}, DEF_PERSONAL), version: 0,
+    uid: null, isOwner: false, canEdit: false, canWrite: null, personalStore: 'local',
+    store: 'starting', db: null, loaded: false, note: '', noteErr: false,
+    view: 'next',
+    opp: '', oppText: null, oppForm: null, oppEdited: false, oppVersion: -1, oppResult: null, shownPerm: null, roll: null,
+    oppManual: false, oppOpen: false, meManual: false, meText: null,
+    bundle: [], bundleState: 'loading', logAll: false,
+    sel: null, forceReal: false, lastDemo: undefined, cal: null, busy: '',
+    form: null, formMsg: '', confirm: null,
+    meDraft: null, importText: '', importMsg: '', copyMsg: '', wipe: 0, showAll: false, showExport: false
+  };
+
+  /* ---------- helpers ---------- */
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const pct = (x, d = 0) => (x == null || !isFinite(x) ? '–' : (x * 100).toFixed(d) + '%');
+  const fmtP = (p) => (!isFinite(p) ? '?' : p >= 100 ? p.toFixed(0) : p.toFixed(1));
+  const key = E.keyOf;
+  const blank = () => [{ t: 'T', p: '' }, { t: 'A', p: '' }, { t: 'M', p: '' }];
+  const clone = (f) => f.map((q) => (q.id != null ? { t: q.t, p: q.p, id: q.id } : { t: q.t, p: q.p }));
+  const valid = (f) => (f ? E.normSquads(f) : null);
+  const short = (n) => (n.length > 20 ? n.slice(0, 19) + '…' : n);
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : (/(ch|sh|s|x)$/.test(w) ? 'es' : 's')}`;
+  const byName = (x, y) => x.localeCompare(y, undefined, { sensitivity: 'base' }) || (x < y ? -1 : x > y ? 1 : 0);
+  const OTHER = '__other__';
+
+  function chip(q) {
+    return `<span class="chip t-${q.t}" title="${E.TYPE_NAME[q.t]}, ${fmtP(q.p)}M power${q.id != null ? ', team ' + esc(q.id) : ''}"><b>${TS[q.t]}</b><span>${fmtP(q.p)}</span></span>`;
+  }
+  function orderHTML(form, big) {
+    return `<span class="order${big ? ' big' : ''}">${form.map(chip).join('<i class="arr" aria-hidden="true"></i>')}</span>`;
+  }
+  const permHTML = (canon, k, big) => orderHTML(E.orderSquads(canon, k), big);
+  function minis(form) {
+    const label = form.map((q) => TS[q.t] + ' ' + fmtP(q.p)).join(' › ');
+    return `<span class="minis" title="${esc(label)}" aria-label="${esc(label)}">${form.map((q) => `<span class="mini t-${q.t}" aria-hidden="true">${q.t}</span>`).join('')}</span>`;
+  }
+  const permText = (canon, k) => E.orderSquads(canon, k).map((q) => TS[q.t] + ' ' + fmtP(q.p)).join(' › ');
+
+  /* ---------- example data, used only while nothing is logged ---------- */
+  let DEMO = null;
+  const demo = () => DEMO || (DEMO = E.exampleData(2026));
+  // Fights come from two places: battle reports shipped with the page (data/reports.json) and fights logged in the shared database.
+  const allBattles = () => (S.bundle.length ? S.bundle.concat(S.battles) : S.battles);
+  const isDemo = () => !S.battles.length && !S.bundle.length && !S.personal.myForm && !S.forceReal;
+  const battles = () => (isDemo() ? demo().battles : allBattles());
+  function baseSettings() {
+    // On a public website each visitor starts by picking their own name.
+    const owner = S.isOwner || (S.store !== 'db' && !S.standalone);
+    return { me: S.personal.me || (owner ? S.shared.me : '') || '', myForm: S.personal.myForm || null,
+      bonus: S.shared.bonus, sigma: S.shared.sigma, attr: S.shared.attr, sims: S.shared.sims };
+  }
+  const settings = () => (isDemo() ? Object.assign({}, baseSettings(), { me: demo().me, myForm: demo().myForm }) : baseSettings());
+  const canAdmin = () => S.store !== 'db' || S.canEdit;
+  const canAdd = () => S.store !== 'db' || S.canWrite !== false;
+  function pickDemoOpp() {
+    const m = model(), meK = key(demo().me);
+    const met = Object.values(m.index.players).filter((p) => p.key !== meK && p.entries.some((e) => e.oppKey === meK));
+    met.sort((x, y) => m.playerRm[y.key].r - m.playerRm[x.key].r);
+    if (met.length) return met[0].name;
+    const names = Object.values(m.index.players).map((p) => p.name);
+    return names.find((n) => n !== demo().me) || '';
+  }
+
+  /* ---------- model cache ---------- */
+  /* ---------- every logged player, and which qualifier group they are in ---------- */
+  let FI = null, FIK = '', GI = null;
+  function fullIndex() {
+    const k = isDemo() ? 'demo' : 'v' + S.version;
+    if (FI && FIK === k) return FI;
+    FI = E.buildIndex(battles()); FIK = k; GI = null;
+    return FI;
+  }
+  // Qualifier groups never meet, so players linked through logged fights make up one group.
+  // Imported reports also carry the group's letter (g); older entries without it join through their fights.
+  function groupInfo() {
+    const ix = fullIndex();
+    if (GI && GI.ix === ix) return GI;
+    const parent = {};
+    const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+    Object.keys(ix.players).forEach((k) => { parent[k] = k; });
+    ix.battles.forEach((b) => { const ra = find(key(b.a.name)), rb = find(key(b.b.name)); if (ra !== rb) parent[ra] = rb; });
+    const comp = {}, size = {}, votes = {};
+    Object.keys(parent).forEach((k) => { const r = find(k); comp[k] = r; size[r] = (size[r] || 0) + 1; });
+    ix.battles.forEach((b) => { if (!b.g) return; const r = comp[key(b.a.name)], v = votes[r] || (votes[r] = {}); v[b.g] = (v[b.g] || 0) + 1; });
+    const label = {};
+    Object.keys(size).forEach((r) => { const v = votes[r]; label[r] = v ? Object.keys(v).sort((x, y) => v[y] - v[x])[0] : ''; });
+    const roots = Object.keys(size).sort((x, y) => byName(label[x] || '~', label[y] || '~') || size[y] - size[x]);
+    GI = { ix, comp, label, roots, size };
+    return GI;
+  }
+  const groupName = (G, r) => (G.label[r] ? 'Group ' + G.label[r] : 'Other players');
+  // The model only needs your group (and your opponent's, in the knockouts): fitting every group at once is slow on phones.
+  function scopeRoots() {
+    const G = groupInfo();
+    if (G.roots.length <= 1) return null;
+    const roots = new Set(), st = settings();
+    const mine = G.comp[key(st.me)] || G.comp[key(S.shared.me)];
+    if (mine) roots.add(mine);
+    if (S.opp && G.comp[key(S.opp)]) roots.add(G.comp[key(S.opp)]);
+    if (!roots.size) roots.add(G.roots.slice().sort((x, y) => G.size[y] - G.size[x])[0]);
+    return Array.from(roots).sort();
+  }
+  function scopedBattles() {
+    const sr = scopeRoots();
+    if (!sr) return battles();
+    const G = groupInfo(), keep = new Set(sr);
+    return G.ix.battles.filter((b) => keep.has(G.comp[key(b.a.name)]));
+  }
+
+  let M = null, MK = '', WF = null, WFME = null;
+  function model() {
+    const st = settings(), sr = scopeRoots();
+    const k = [isDemo() ? 'demo' : 'v' + S.version, st.me, st.bonus, st.sigma, st.attr, st.sims, sr ? sr.join(',') : 'all'].join('|');
+    if (M && MK === k) return M;
+    M = E.buildModel(scopedBattles(), { me: st.me, bonus: +st.bonus, sigma: +st.sigma, attr: +st.attr || 1.5, sims: +st.sims || 1500 });
+    MK = k; WF = null; WFME = null;
+    return M;
+  }
+  const wf = () => WF || (WF = E.walkForward(model()));
+  function wfMe() {
+    const m = model();
+    if (!m.meKey || !m.obsBy[m.meKey]) return null;
+    return WFME || (WFME = E.walkForward(m, m.meKey));
+  }
+  const bump = () => { S.version++; };
+
+  function myForm() {
+    const f = valid(settings().myForm);
+    if (f) return f;
+    const m = model(), me = m.index.players[m.meKey];
+    return me && me.entries.length ? me.entries[me.entries.length - 1].form : null;
+  }
+  function defaultShown(mf) {
+    const m = model(), me = m.index.players[m.meKey];
+    const mc = E.canonical(mf).canon;
+    const src = me && me.entries.length ? me.entries[me.entries.length - 1].form : mf;
+    return { k: E.matchPerm(src, mc), fromLog: !!(me && me.entries.length) };
+  }
+  function players() {
+    const m = model();
+    return Object.values(m.index.players).filter((p) => p.key !== m.meKey).map((p) => {
+      const last = p.entries[p.entries.length - 1];
+      return { key: p.key, name: p.name, n: p.entries.length, w: p.entries.filter((e) => e.won).length, last };
+    }).sort((a, b) => b.last.round - a.last.round || b.n - a.n || a.name.localeCompare(b.name));
+  }
+  const topTendency = (w) => E.EXPERTS.slice().sort((a, b) => w[b] - w[a])[0];
+
+  /* ---------- name pickers ---------- */
+  function myLog() {
+    const m = model(), me = m.index.players[m.meKey];
+    return me && me.entries.length ? me.entries[me.entries.length - 1] : null;
+  }
+  // Pairings go by record, so players whose record matches yours are the likeliest next opponents.
+  // Only players with a fight logged in every round have a record that can be trusted.
+  function likelyOpps() {
+    const m = model(), me = m.index.players[m.meKey];
+    if (!me) return [];
+    const nR = new Set(m.index.battles.map((b) => b.round)).size;
+    const full = (p) => new Set(p.entries.map((e) => e.round)).size === nR;
+    if (!full(me)) return [];
+    const wins = (p) => p.entries.filter((e) => e.won).length, mw = wins(me);
+    return Object.values(m.index.players).filter((p) => p.key !== me.key && full(p))
+      .map((p) => { const w = wins(p); return { name: p.name, w, l: p.entries.length - w, d: Math.abs(w - mw) }; })
+      .filter((x) => x.d <= 1)
+      .sort((a, b) => a.d - b.d || b.w - a.w || byName(a.name, b.name))
+      .slice(0, 6);
+  }
+  const option = (v, label, sel, dis) => `<option value="${esc(v)}"${sel ? ' selected' : ''}${dis ? ' disabled' : ''}>${esc(label)}</option>`;
+  // Players from other alliances who are listed in the "your alliance" section too.
+  const EXTRA_MATES = ['Ali ᚢ'];
+  // Your alliance: the tracker owner's tag, or your own once you have picked your name.
+  function teamAlliance() {
+    const P = fullIndex().players, o = P[key(S.shared.me)] || P[key(settings().me)];
+    return o && o.al ? o.al : '';
+  }
+  const SELC = {};
+  function memoSel(id, k, build) { const c = SELC[id]; if (c && c.k === k) return c.html; const html = build(); SELC[id] = { k, html }; return html; }
+  function meSelect(id) {
+    const dm = isDemo(), me = settings().me, meK = key(me);
+    // With only example fights there are no real names to pick, so Setup takes a typed name.
+    if (dm && id === 'set-me') return `<input id="me-name" type="text" autocomplete="off" spellcheck="false" value="${esc(S.meText != null ? S.meText : baseSettings().me)}" placeholder="Exactly as it appears in battle reports">`;
+    const P = fullIndex().players, inLog = !!(me && P[meK]);
+    const manual = !dm && (S.meManual || (!!me && !inLog));
+    const team = teamAlliance();
+    const opts = memoSel(id, [FIK, meK, inLog, manual, team].join('|'), () => {
+      const G = groupInfo(), many = G.roots.length > 1;
+      let done = false;
+      const opt = (p, label) => { const sel = !done && !manual && inLog && p.key === meK; if (sel) done = true; return option(p.name, label || p.name, sel); };
+      const sorted = (ps) => ps.sort((x, y) => byName(x.name, y.name));
+      const all = Object.values(P);
+      let o = option('', 'Pick your name', !inLog || manual, true);
+      const extra = new Set(EXTRA_MATES.map(key));
+      const mates = team ? sorted(all.filter((p) => p.al === team || extra.has(p.key))) : [];
+      if (mates.length) o += `<optgroup label="${esc(team)} · your alliance">${mates.map((p) => opt(p, many && G.label[G.comp[p.key]] ? `${p.name} · ${G.label[G.comp[p.key]]}` : p.name)).join('')}</optgroup>`;
+      if (many) G.roots.forEach((r) => { o += `<optgroup label="${esc(groupName(G, r))}">${sorted(all.filter((p) => G.comp[p.key] === r)).map((p) => opt(p)).join('')}</optgroup>`; });
+      else o += (mates.length ? '<optgroup label="Everyone">' : '') + sorted(all).map((p) => opt(p)).join('') + (mates.length ? '</optgroup>' : '');
+      if (!dm) o += option(OTHER, 'I’m not on this list', manual);
+      return o;
+    });
+    return `<select id="${id}" class="pick"${dm ? ' disabled' : ''}>${opts}</select>` +
+      (manual ? `<input id="me-name" type="text" autocomplete="off" spellcheck="false" value="${esc(S.meText != null ? S.meText : me)}" placeholder="Your name, exactly as in battle reports" aria-label="Your name in the duel">` : '');
+  }
+  // Players who used the same order in every logged fight (3 or more fights).
+  let NM = null, NMK = '';
+  function neverMovers() {
+    const P = fullIndex().players;
+    if (NM && NMK === FIK) return NM;
+    NM = new Set(); NMK = FIK;
+    Object.values(P).forEach((p) => {
+      if (p.entries.length < 3) return;
+      const canon = E.canonical(p.entries[p.entries.length - 1].form).canon;
+      if (new Set(p.entries.map((e) => E.matchPerm(e.form, canon))).size === 1) NM.add(p.key);
+    });
+    return NM;
+  }
+  function oppSelect() {
+    const P = fullIndex().players, meK = key(settings().me), sk = key(S.opp);
+    const inLog = !!(S.opp && P[sk]);
+    const manual = S.oppManual || (!!S.opp && !inLog);
+    const opts = memoSel('opp-pick', [FIK, meK, sk, inLog, manual].join('|'), () => {
+      const G = groupInfo(), mine = P[meK] ? G.comp[meK] : null;
+      const all = Object.values(P).filter((p) => p.key !== meK);
+      const list = (ps) => ps.sort((x, y) => byName(x.name, y.name)).map((p) => option(p.name, p.name, !manual && inLog && p.key === sk)).join('');
+      let o = option('', 'Pick your opponent', !inLog || manual, true);
+      // Never change their lineup: your group only (all groups if you haven't picked your name).
+      const nm = neverMovers(), many = G.roots.length > 1;
+      const steady = all.filter((p) => nm.has(p.key) && (!mine || !many || G.comp[p.key] === mine)).sort((x, y) => byName(x.name, y.name));
+      if (steady.length) {
+        const where = mine && many ? ` · ${groupName(G, mine)}` : '';
+        o += `<optgroup label="Never change their lineup${esc(where)}">${steady.map((p) => option(p.name, `${p.name} · same order all ${p.entries.length} fights${!mine && many && G.label[G.comp[p.key]] ? ' · ' + G.label[G.comp[p.key]] : ''}`, false)).join('')}</optgroup>`;
+      }
+      if (G.roots.length > 1) {
+        const order = mine ? [mine].concat(G.roots.filter((r) => r !== mine)) : G.roots;
+        order.forEach((r) => {
+          const ps = all.filter((p) => G.comp[p.key] === r);
+          if (ps.length) o += `<optgroup label="${esc(groupName(G, r))}${r === mine ? ' (yours)' : ''}">${list(ps)}</optgroup>`;
+        });
+      } else o += list(all);
+      return o + option(OTHER, 'Someone not on this list', manual);
+    });
+    return `<select id="opp-pick" class="pick">${opts}</select>` +
+      (manual ? `<input id="opp-name" type="text" list="dl-players" autocomplete="off" spellcheck="false" placeholder="Their name in the duel" aria-label="Opponent's name" value="${esc(S.oppText != null ? S.oppText : S.opp)}">` : '');
+  }
+  function pickMe(name) {
+    const n = String(name || '').trim();
+    if (key(n) !== key(baseSettings().me)) { S.personal.myForm = null; S.meDraft = null; }
+    S.personal.me = n; S.meManual = false; S.meText = null; S.shownPerm = null; S.roll = null; S.form = null;
+    if (S.opp && key(S.opp) === key(n)) { S.opp = ''; S.oppForm = null; S.oppManual = false; }
+    savePersonal(); render();
+  }
+  function focusSoon(id) { setTimeout(() => { const el = document.getElementById(id); if (el) el.focus(); }, 80); }
+
+  /* ---------- opponent under scouting ---------- */
+  function setOpp(name) {
+    S.opp = String(name || '').trim(); S.oppText = null; S.roll = null;
+    const m = model(), pl = S.opp ? m.index.players[key(S.opp)] : null;
+    const last = pl ? pl.entries[pl.entries.length - 1] : null;
+    if (pl) S.oppManual = false;
+    S.oppForm = last ? clone(last.form) : blank();
+    S.oppEdited = !last;
+    S.oppResult = last ? (last.won ? 'W' : 'L') : null;
+    S.oppVersion = S.version;
+  }
+  function draftOf(target) {
+    if (target === 'opp') return S.oppForm || (S.oppForm = blank());
+    if (target === 'me') return S.meDraft || (S.meDraft = S.personal.myForm ? clone(S.personal.myForm) : blank());
+    if (target === 'a' || target === 'b') return form()[target].s;
+    return null;
+  }
+  function afterDraft(target) {
+    if (target === 'opp') {
+      const m = model(), pl = m.index.players[key(S.opp)], last = pl && pl.entries[pl.entries.length - 1];
+      const v = valid(S.oppForm);
+      S.oppEdited = !last || !v || !E.sameForm(v, last.form);
+      S.roll = null;
+    } else if (target === 'me') {
+      const v = valid(S.meDraft);
+      if (v) { S.personal.myForm = v; S.roll = null; S.shownPerm = null; savePersonal(); }
+    } else if (target === 'a' || target === 'b') {
+      form()[target].touched = true;
+    }
+  }
+
+  /* ---------- storage ---------- */
+  function loadLocal() {
+    try {
+      const raw = localStorage.getItem(LS);
+      if (raw) {
+        const o = JSON.parse(raw), st = o.shared || o.settings || {};
+        S.battles = Array.isArray(o.battles) ? o.battles : [];
+        S.shared = Object.assign({}, DEF_SHARED, st);
+        S.personal = Object.assign({}, DEF_PERSONAL, o.personal || { me: st.me || '', myForm: st.myForm || null });
+      }
+    } catch (e) { /* storage unavailable in this view */ }
+  }
+  function saveLocal() {
+    try { localStorage.setItem(LS, JSON.stringify({ battles: S.battles, shared: S.shared, personal: S.personal })); } catch (e) { /* ignore */ }
+  }
+  function loadPersonalLocal() { try { const raw = localStorage.getItem(LS_ME); if (raw) S.personal = Object.assign({}, DEF_PERSONAL, JSON.parse(raw)); } catch (e) { /* ignore */ } }
+  function savePersonalLocal() { try { localStorage.setItem(LS_ME, JSON.stringify(S.personal)); } catch (e) { /* ignore */ } }
+  function errText(e) {
+    const c = e && e.code;
+    if (c === 'quota_exceeded') return 'The tracker is full. Delete old battles to add new ones.';
+    if (c === 'invalid_argument') return 'You can view this tracker but not change it.';
+    if (c === 'resource_exhausted') return 'Too many changes at once. Wait a few seconds and try again.';
+    if (c === 'revoked' || c === 'not_granted' || c === 'capability_disabled' || c === 'capability_removed') return 'Saving is off in this view.';
+    return 'Couldn’t save just now. Try again in a moment.';
+  }
+  function showErr(e) { S.note = errText(e); S.noteErr = true; render(); }
+
+  let setT = 0, setBusy = false, setAgain = false;
+  function saveShared() { clearTimeout(setT); setT = setTimeout(flushShared, 400); }
+  async function flushShared() {
+    if (S.store !== 'db') { saveLocal(); return; }
+    if (setBusy) { setAgain = true; return; }
+    setBusy = true;
+    try { await S.db.doc('meta/settings').set(JSON.parse(JSON.stringify(S.shared))); } catch (e) { showErr(e); }
+    setBusy = false;
+    if (setAgain) { setAgain = false; flushShared(); }
+  }
+  // Each viewer's own name and squads live in their private subtree, so teammates never overwrite each other.
+  let perT = 0, perBusy = false, perAgain = false;
+  function savePersonal() { clearTimeout(perT); perT = setTimeout(flushPersonal, 400); }
+  async function flushPersonal() {
+    if (S.store !== 'db') { saveLocal(); return; }
+    if (S.personalStore !== 'db') { savePersonalLocal(); return; }
+    if (perBusy) { perAgain = true; return; }
+    perBusy = true;
+    try { await S.db.doc('data/users/' + S.uid + '/settings').set(JSON.parse(JSON.stringify(S.personal))); }
+    catch (e) { S.personalStore = 'local'; savePersonalLocal(); S.note = 'Your name and squads are saved in this browser only.'; S.noteErr = false; render(); }
+    perBusy = false;
+    if (perAgain) { perAgain = false; flushPersonal(); }
+  }
+  // A write the server is too busy for is retried a few times before giving up.
+  async function retrying(fn) {
+    for (let i = 0; ; i++) {
+      try { return await fn(); }
+      catch (e) { if (e && e.code === 'resource_exhausted' && i < 6) { await new Promise((r) => setTimeout(r, 1500 * (i + 1))); continue; } throw e; }
+    }
+  }
+  // Imported reports carry their own id (_id), so importing them again never makes copies.
+  async function addBattles(list, onProgress) {
+    if (S.store === 'db') {
+      for (let i = 0; i < list.length; i++) {
+        const b = Object.assign({}, list[i]), id = b._id;
+        delete b._id;
+        await retrying(() => (id ? S.db.doc('battles/' + id).set(b) : S.db.collection('battles').add(b)));
+        if (onProgress) onProgress(i + 1, list.length);
+        if (list.length > 5) await new Promise((r) => setTimeout(r, 25));
+      }
+    } else {
+      list.forEach((x) => { const b = Object.assign({}, x), id = b._id; delete b._id; S.battles.push(Object.assign({ id: id || 'L' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7) }, b)); });
+      saveLocal(); bump();
+    }
+  }
+  async function deleteBattle(id) {
+    if (S.store === 'db') await S.db.doc('battles/' + id).delete();
+    else { S.battles = S.battles.filter((b) => b.id !== id); saveLocal(); bump(); }
+  }
+  async function initStore() {
+    let db = null, user = null;
+    const use = (n) => (window.claude && typeof window.claude.use === 'function' ? Promise.resolve(window.claude.use(n)).catch(() => null) : Promise.resolve(null));
+    try { [db, user] = await Promise.all([use('db'), use('user')]); } catch (e) { db = null; user = null; }
+    // No claude.ai database (e.g. hosted on a normal website): everything saves on this device.
+    if (!db) { S.store = 'local'; S.standalone = !window.claude; loadLocal(); bump(); render(); return; }
+    if (user) {
+      try {
+        const r = await Promise.all([user.id(), user.isOwner(), user.canEdit(), user.can('data.write')]);
+        S.uid = r[0]; S.isOwner = !!r[1]; S.canEdit = !!r[2]; S.canWrite = r[3];
+      } catch (e) { /* reads never reject; stay with defaults */ }
+    }
+    S.db = db; S.store = 'db'; render();
+    const timer = setTimeout(() => {
+      if (!S.loaded) { S.note = 'Your saved battles can’t be reached yet. The page keeps trying.'; S.noteErr = true; render(); }
+    }, 10000);
+    try {
+      db.collection('battles').onSnapshot((snap) => {
+        S.battles = snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+        if (S.busy === 'import' && S.loaded) return;
+        if (!snap.metadata.fromCache && !S.loaded) {
+          S.loaded = true; clearTimeout(timer);
+          if (S.noteErr && /reached/.test(S.note)) { S.note = ''; S.noteErr = false; }
+        }
+        bump(); render();
+      }, (e) => { clearTimeout(timer); S.loaded = true; S.note = errText(e); S.noteErr = true; render(); });
+      db.doc('meta/settings').onSnapshot((snap) => {
+        if (!snap.exists) return;
+        S.shared = Object.assign({}, DEF_SHARED, snap.data());
+        render();
+      }, () => {});
+      if (S.uid && S.canWrite !== false) {
+        S.personalStore = 'db';
+        db.doc('data/users/' + S.uid + '/settings').onSnapshot((snap) => {
+          if (!snap.exists) return;
+          S.personal = Object.assign({}, DEF_PERSONAL, snap.data());
+          const ae = document.activeElement;
+          if (!(ae && ae.dataset && ae.dataset.target === 'me')) S.meDraft = null;
+          render();
+        }, () => { S.personalStore = 'local'; loadPersonalLocal(); render(); });
+      } else { S.personalStore = 'local'; loadPersonalLocal(); }
+    } catch (e) { S.store = 'local'; loadLocal(); bump(); render(); }
+  }
+
+  /* ---------- rendering ---------- */
+  let raf = 0;
+  function render() {
+    if (raf) return;
+    raf = 1;
+    (window.requestAnimationFrame || setTimeout)(() => { raf = 0; draw(); });
+  }
+  function draw() {
+    const ae = document.activeElement, fid = ae && ae.id ? ae.id : null;
+    let sel = null;
+    try { if (fid && typeof ae.selectionStart === 'number') sel = [ae.selectionStart, ae.selectionEnd]; } catch (e) { sel = null; }
+    const demoNow = isDemo();
+    if (S.lastDemo !== undefined && S.lastDemo !== demoNow) {
+      Object.assign(S, { opp: '', oppText: null, oppForm: null, sel: null, cal: null, roll: null, shownPerm: null, form: null });
+    }
+    S.lastDemo = demoNow;
+    drawChrome();
+    let html;
+    try { html = VIEW[S.view](); }
+    catch (e) { console.error(e); html = `<div class="empty">This view hit a problem: ${esc(e.message)}</div>`; }
+    document.getElementById('view').innerHTML = html;
+    if (fid) {
+      const el = document.getElementById(fid);
+      if (el && document.activeElement !== el) {
+        try { el.focus({ preventScroll: true }); if (sel && el.setSelectionRange) el.setSelectionRange(sel[0], sel[1]); } catch (e) { /* ignore */ }
+      }
+    }
+  }
+  let DLK = '';
+  function drawChrome() {
+    const st = document.getElementById('status');
+    let txt = 'Connecting…', cls = 'status';
+    if (S.store === 'db') { txt = S.loaded ? (S.isOwner ? 'Saved to your tracker' : 'Shared team tracker') : 'Loading saved battles…'; if (S.loaded) cls += ' ok'; }
+    else if (S.store === 'local') { if (S.standalone) { txt = 'Your picks save on this device'; cls += ' ok'; } else { txt = 'Saving in this browser only'; cls += ' warn'; } }
+    st.textContent = txt; st.className = cls;
+    document.querySelectorAll('.tabs a').forEach((a) => {
+      if (a.dataset.view === S.view) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    });
+    let notes = '';
+    if (isDemo()) notes += '<div class="note"><p><b>Example data.</b> These fights are made up so you can see how the tracker works. Log your own battle reports, or send them to Claude to import, and this goes away.</p><button class="btn small" data-act="real">Use my own data</button></div>';
+    if (S.note) notes += `<div class="note${S.noteErr ? ' err' : ''}"><p>${esc(S.note)}</p><button class="btn small" data-act="dismiss">Dismiss</button></div>`;
+    document.getElementById('notes').innerHTML = notes;
+    // Typing suggestions for the free-text name boxes; rebuilt only when the log changes.
+    const P = fullIndex().players, dk = FIK + '|' + key(settings().me);
+    if (DLK !== dk) {
+      DLK = dk;
+      const meK = key(settings().me), names = Object.values(P);
+      document.getElementById('dl-players').innerHTML = names.filter((p) => p.key !== meK).map((p) => `<option value="${esc(p.name)}"></option>`).join('');
+      const all = document.getElementById('dl-all');
+      if (all) all.innerHTML = names.map((p) => `<option value="${esc(p.name)}"></option>`).join('');
+    }
+  }
+
+  function slots(target, form) {
+    return `<div class="stack">${form.map((q, s) => `<div class="slot"><span class="slot-n" aria-hidden="true">${s + 1}</span>
+      <div class="seg" role="group" aria-label="Slot ${s + 1} troop type">${['T', 'A', 'M', 'X'].map((t) => `<button type="button" class="t-${t}" data-act="type" data-target="${target}" data-slot="${s}" data-t="${t}" aria-pressed="${q.t === t}" title="${E.TYPE_NAME[t]}">${TS[t]}</button>`).join('')}</div>
+      <input id="${target}-p${s}" type="text" inputmode="decimal" autocomplete="off" data-target="${target}" data-slot="${s}" value="${esc(q.p == null ? '' : q.p)}" placeholder="Power, M" aria-label="Slot ${s + 1} power in millions">
+    </div>`).join('')}</div>`;
+  }
+  function tendRows(w, r) {
+    const rows = E.EXPERTS.map((e) => ({ label: E.EXPERT_INFO[e].label, blurb: E.EXPERT_INFO[e].blurb, v: w[e] * (r ? 1 - r : 1) }));
+    if (r) rows.push({ label: E.REMATCH_INFO.label, blurb: E.REMATCH_INFO.blurb, v: r });
+    return rows.sort((x, y) => y.v - x.v).map((x) => `<div class="tend" title="${esc(x.blurb)}"><span>${x.label}</span><div class="bar"><i style="width:${(x.v * 100).toFixed(1)}%"></i></div><span class="pct">${pct(x.v)}</span></div>`).join('');
+  }
+  const stat = (label, value) => `<div class="stat"><span>${label}</span><b>${value}</b></div>`;
+
+  /* ---------- Next fight ---------- */
+  function viewNext() {
+    const m = model();
+    if (isDemo() && !S.opp && !S.oppManual) setOpp(pickDemoOpp());
+    if (S.opp && !S.oppForm) setOpp(S.opp);
+    const mf = myForm();
+    const pl = S.opp ? m.index.players[key(S.opp)] : null;
+    if (S.opp && S.oppVersion !== S.version) {
+      const v = valid(S.oppForm);
+      if (!S.oppEdited || (pl && v && pl.entries.some((e) => E.sameForm(v, e.form)))) setOpp(S.opp);
+      else S.oppVersion = S.version;
+    }
+    const latest = pl ? pl.entries[pl.entries.length - 1] : null;
+    const mine = myLog(), meName = settings().me, hasLog = m.index.battles.length > 0;
+    const likely = likelyOpps().filter((x) => key(x.name) !== key(S.opp));
+    const src = isDemo() ? 'example squads' : valid(S.personal.myForm) ? 'entered by hand in <a href="#setup">Setup</a>' : mine ? `from your round ${esc(mine.round)} report` : '';
+    const meNote = mf ? `<div class="row">${orderHTML(mf)}<span class="meta">${src}</span></div>`
+      : meName ? `<p class="meta">No fights logged under this name yet. Add your squads in <a href="#setup">Setup</a>.</p>`
+      : `<p class="meta">${hasLog ? 'Your squads fill in from your latest battle report.' : 'Or add your squads in Setup.'}</p>`;
+
+    let opp = `<section class="card c-opp" aria-labelledby="h-opp">
+      <div class="card-h"><h2 id="h-opp">Matchup</h2></div>
+      <div class="field"><label class="lbl" for="me-pick">You</label>${meSelect('me-pick')}${meNote}</div>
+      <div class="vsd" aria-hidden="true">vs</div>
+      <div class="field"><label class="lbl" for="opp-pick">Opponent</label>${oppSelect()}</div>
+      ${likely.length ? `<div class="stack"><span class="lbl">Likely next, by record</span><div class="quick flow" role="group" aria-label="Likely next opponents">${likely.map((x) => `<button type="button" class="btn small" data-act="opp" data-name="${esc(x.name)}">${esc(short(x.name.replace(/^\[Example\] /, '')))} <span class="rec">${x.w}–${x.l}</span></button>`).join('')}</div></div>` : ''}`;
+    const manualOpp = S.oppManual || (!!S.opp && !pl);
+    if (S.opp || manualOpp) {
+      const meetings = pl && m.meKey ? pl.entries.filter((e) => e.oppKey === m.meKey) : [];
+      const open = manualOpp || S.oppOpen || S.oppEdited;
+      opp += `<p class="meta">${latest ? `Last logged: round ${esc(latest.round)}, ${latest.won ? 'won' : 'lost'} against ${esc(latest.oppName)}.` : 'Not in the log yet. Enter the formation their battle record shows.'}${meetings.length ? ` <span class="tag hot">Rematch</span> You've met ${meetings.length === 1 ? 'once' : meetings.length + ' times'}.` : ''}</p>`;
+      if (!open) {
+        opp += `<div class="stack"><div class="lbl"><span>Their last formation</span><span class="hint">Slot 1 fights first</span></div>${orderHTML(valid(S.oppForm) || latest.form)}
+          <p class="meta">Game shows a newer one? <button type="button" class="linkbtn" data-act="oedit">Edit it</button></p></div>`;
+      } else {
+        opp += `<div class="lbl"><span>Their last formation</span><span class="hint">Slot 1 fights first · squad power without troops</span></div>
+      ${slots('opp', draftOf('opp'))}
+      <div class="lbl"><span>Their last result</span></div>
+      <div class="seg" role="group" aria-label="Their last result">
+        <button type="button" data-act="ores" data-v="W" aria-pressed="${S.oppResult === 'W'}">Won</button>
+        <button type="button" data-act="ores" data-v="L" aria-pressed="${S.oppResult === 'L'}">Lost</button>
+        <button type="button" data-act="ores" data-v="" aria-pressed="${!S.oppResult}">Not sure</button>
+      </div>
+      ${pl && S.oppEdited ? '<p class="meta">This differs from their latest logged fight, so it counts as a newer formation. <button type="button" class="linkbtn" data-act="oreset">Reset to log</button></p>' : pl ? '<p class="meta"><button type="button" class="linkbtn" data-act="oedit">Done</button></p>' : ''}`;
+      }
+    }
+    opp += '</section>';
+
+    let you = '<section class="card c-you" aria-labelledby="h-you"><div class="card-h"><h2 id="h-you">You</h2><a href="#setup">Edit squads</a></div>';
+    let pr = null;
+    if (mf) {
+      const mc = E.canonical(mf).canon, ds = defaultShown(mf);
+      const shownK = S.shownPerm != null ? S.shownPerm : ds.k;
+      you += `<div class="field"><label class="lbl" for="shown">What they'll see of you</label>
+        <select id="shown">${E.PERMS.map((_, k) => `<option value="${k}"${k === shownK ? ' selected' : ''}>${esc(permText(mc, k))}${k === ds.k ? (ds.fromLog ? ' (last fight)' : ' (current)') : ''}</option>`).join('')}</select>
+        <p class="meta">They see the formation from your last fight, the same way you see theirs.</p></div>`;
+      const of = valid(S.oppForm);
+      if (S.opp && of) {
+        pr = E.predict(m, { opp: S.opp, oppForm: S.oppEdited ? of : null, oppLastResult: S.oppResult, myForm: mf, myShown: E.orderSquads(mc, shownK) });
+      }
+    } else {
+      you += hasLog && !meName ? '<p>Pick your name under Matchup. Your squads fill in from your latest battle report.</p>'
+        : '<p>Add your three squads in Setup so the tracker can simulate your fights.</p><div><a class="btn primary" href="#setup">Go to Setup</a></div>';
+    }
+    you += '</section>';
+
+    let out;
+    if (pr) out = heroCard(pr) + predCard(pr) + mixCard(pr) + mxCard(pr);
+    else {
+      const msg = !mf ? (hasLog && !meName ? 'Pick your name to get a call.' : 'Add your squads in Setup to get a call.') : !S.opp ? (S.oppManual ? 'Type their name and formation to get a call.' : 'Pick your opponent to get a call.') : 'Enter type and power for all three of their squads to get a call.';
+      out = `<section class="card hero c-hero"><div class="card-h"><h2>Play this order</h2></div><div class="empty">${msg}</div></section>`;
+    }
+    return `<div class="grid-next"><div class="col">${opp}${you}</div><div class="col">${out}</div></div>`;
+  }
+  function heroCard(pr) {
+    const b = pr.best, ev = pr.ev[b], gain = ev - pr.nash.value;
+    const others = pr.ranked.slice(1);
+    const minAll = Math.min.apply(null, pr.worst), maxAll = Math.max.apply(null, pr.ev);
+    const lopsided = minAll >= 0.98 ? 'Every order wins this fight: your squads are far stronger, so order only matters for how many troops you keep.'
+      : maxAll <= 0.02 ? 'No order wins this one on paper: their squads are far stronger. The order shown loses the least badly.' : '';
+    return `<section class="card hero c-hero" aria-labelledby="h-hero">
+      <div class="card-h"><h2 id="h-hero">Play this order</h2><span class="stamp">vs ${esc(short(S.opp))}</span></div>
+      ${permHTML(pr.myCanon, b, true)}
+      <div class="big-row"><span class="big-num">${pct(ev)}</span><span class="cap">chance to win if they play the way the model expects</span></div>
+      ${lopsided ? `<p class="callout">${lopsided}</p>` : `<p class="callout">Worst case ${pct(pr.worst[b])}, if they play ${minis(E.orderSquads(pr.theirCanon, pr.worstAgainst[b]))}. ${gain < 0.02 ? 'Reading this player barely helps here, so the safe mix below is about as good.' : `The safe mix only guarantees ${pct(pr.nash.value)}.`}</p>`}
+      <div class="scroll"><table><thead><tr><th>Other orders</th><th>If predicted</th><th>Worst case</th></tr></thead><tbody>
+        ${others.map((k) => `<tr><td>${permHTML(pr.myCanon, k)}</td><td>${pct(pr.ev[k])}</td><td>${pct(pr.worst[k])}</td></tr>`).join('')}
+      </tbody></table></div>
+      <p class="foot">Whatever you play now becomes the formation your next opponent sees.</p>
+    </section>`;
+  }
+  function predCard(pr) {
+    const order = E.PERMS.map((_, k) => k).sort((a, b) => pr.p[b] - pr.p[a]);
+    const top = order[0];
+    let lead;
+    if (pr.theirLastPerm == null) lead = `Most likely order: ${pct(pr.p[top])}.`;
+    else if (pr.theirLastPerm === top) lead = `Most likely they repeat their last order (${pct(pr.p[top])}).`;
+    else lead = `Most likely they switch away from their last order (${pct(pr.p[top])} on the top pick).`;
+    const basis = pr.known
+      ? `Based on ${plural(pr.nFights, 'logged fight')}${pr.extraSeen ? ' plus the formation you entered' : ''}. Players with few fights lean on how your whole log behaves.`
+      : 'No fights logged for this player, so this uses how opponents in your log usually play.';
+    const rm = pr.rematch;
+    const rmBox = rm ? `<div class="rematch"><p><span class="tag hot">Rematch</span> In round ${esc(rm.round)} they played ${minis(rm.theirForm)} against your ${minis(rm.myForm)} and ${rm.theyWon ? 'won' : 'lost'}. ${rm.theyWon ? 'A player who remembers would replay the order that beat you.' : 'A player who remembers would counter the order that beat them.'}</p>
+      <p class="meta">The model gives that ${pct(rm.r)} weight, ${rm.n ? `from their ${plural(rm.n, 'earlier rematch')} and your whole log` : 'from how players in your log handle rematches'}.</p></div>` : '';
+    return `<section class="card c-pred" aria-labelledby="h-pred">
+      <div class="card-h"><h2 id="h-pred">Their likely order</h2></div>
+      <p class="lead">${lead}</p>
+      ${rmBox}
+      <div class="stack">${order.map((k, i) => `<div class="prow${i === 0 ? ' top' : ''}"><span class="row">${permHTML(pr.theirCanon, k)}${k === pr.theirLastPerm ? '<span class="tag">Last played</span>' : ''}</span><div class="bar${i ? ' muted' : ''}"><i style="width:${(pr.p[k] * 100).toFixed(1)}%"></i></div><span class="pct">${pct(pr.p[k])}</span></div>`).join('')}</div>
+      <div class="lbl"><span>How they decide</span></div>
+      <div class="stack">${tendRows(pr.weights, rm ? rm.r : 0)}</div>
+      <p class="foot">${basis}</p>
+    </section>`;
+  }
+  function mixCard(pr) {
+    const rows = E.PERMS.map((_, k) => k).filter((k) => pr.nash.row[k] > 0).sort((a, b) => pr.nash.row[b] - pr.nash.row[a]);
+    return `<section class="card c-mix" aria-labelledby="h-mix">
+      <div class="card-h"><h2 id="h-mix">Safe mix</h2><span class="aside">floor ${pct(pr.nash.value)}</span></div>
+      <p>If you'd rather not be read, pick at random with these odds. Whatever they play, you win at least ${pct(pr.nash.value)} of the time.</p>
+      <div class="stack">${rows.map((k) => `<div class="prow"><span>${permHTML(pr.myCanon, k)}</span><div class="bar muted"><i style="width:${(pr.nash.row[k] * 100).toFixed(1)}%"></i></div><span class="pct">${pct(pr.nash.row[k])}</span></div>`).join('')}</div>
+      <div class="row"><button type="button" class="btn" data-act="roll">Pick one for me</button>${S.roll != null ? `<span class="row">Play ${permHTML(pr.myCanon, S.roll)}</span>` : ''}</div>
+    </section>`;
+  }
+  function mxCard(pr) {
+    const cols = E.PERMS.map((_, k) => k).sort((a, b) => pr.p[b] - pr.p[a]);
+    const cell = (v) => {
+      const d = Math.min(55, Math.abs(v - 0.5) * 2 * 55).toFixed(0);
+      return `background: color-mix(in oklab, ${v >= 0.5 ? 'var(--win)' : 'var(--loss)'} ${d}%, var(--panel))`;
+    };
+    return `<section class="card c-mx"><details><summary>All 36 matchups: your win chance</summary>
+      <div class="scroll"><table class="mx"><thead><tr><th>You \\ They</th>${cols.map((j) => `<th>${minis(E.orderSquads(pr.theirCanon, j))}<span class="p">${pct(pr.p[j])}</span></th>`).join('')}</tr></thead>
+      <tbody>${pr.ranked.map((i) => `<tr><th>${minis(E.orderSquads(pr.myCanon, i))}</th>${cols.map((j) => `<td class="cell" style="${cell(pr.Wme[i][j])}">${pct(pr.Wme[i][j])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+      <p class="meta">Columns are their orders, most likely first, with the model's odds under each. Rows are your orders, best first.</p></details></section>`;
+  }
+
+  /* ---------- Opponents ---------- */
+  function viewOpponents() {
+    const m = model(), list = players();
+    if (!list.length) return '<div class="empty">No opponents logged yet. Add battle reports in the <a href="#log">Battle log</a>.</div>';
+    const sk = S.sel && m.index.players[S.sel] && S.sel !== m.meKey ? S.sel : list[0].key;
+    const p = m.index.players[sk], w = m.playerW[sk], obs = m.obsBy[sk], calls = wf().calls[sk] || [];
+    const scored = calls.filter(Boolean), hits = scored.filter((c) => c.hit).length;
+    const latest = p.entries[p.entries.length - 1];
+    const left = `<section class="card"><div class="card-h"><h2>Opponents</h2><span class="aside">${list.length}</span></div>
+      <div class="plist">${list.map((q) => `<button type="button" data-act="sel" data-k="${esc(q.key)}" aria-current="${q.key === sk}"><span class="nm"><span>${esc(q.name)}</span><span class="meta">${q.w}–${q.n - q.w}</span></span><span class="row">${minis(q.last.form)}<span class="meta">${E.EXPERT_INFO[topTendency(m.playerW[q.key])].label}</span></span></button>`).join('')}</div></section>`;
+    const rows = p.entries.map((e, t) => ({ e, t })).reverse().map(({ e, t }) => {
+      const o = obs[t], c = calls[t];
+      const call = c ? (c.hit ? '<span class="ok">Right</span>' : `<span class="bad">Missed</span> ${minis(E.orderSquads(o.canon, c.top))}`) : '<span class="meta">First fight</span>';
+      return `<tr><td class="num">${esc(e.round)}</td><td>${orderHTML(e.form)}</td><td>${esc(e.oppName)}${o.rm ? ' <span class="tag">Rematch</span>' : ''}</td><td>${o.seen.proxy ? '<span class="meta" title="Their opponent’s earlier fight isn’t logged, so this shows what that opponent played here">~</span> ' : ''}${minis(o.seen.lastForm)}</td><td>${e.won ? '<span class="pill w">Won</span>' : '<span class="pill l">Lost</span>'}</td><td>${call}</td></tr>`;
+    }).join('');
+    const right = `<section class="card"><div class="card-h"><h2>${esc(p.name)}</h2><button type="button" class="btn small primary" data-act="scout" data-name="${esc(p.name)}">Scout as next opponent</button></div>
+      <div class="row"><span class="lbl">Latest order</span>${orderHTML(latest.form)}</div>
+      <div class="lbl"><span>How they decide</span><span class="hint">${scored.length ? `Model called ${hits} of ${scored.length} of their fights right` : 'Needs two fights to test the model'}</span></div>
+      <div class="stack">${tendRows(w)}</div>
+      ${m.playerRm[sk].n ? `<p class="meta">In ${plural(m.playerRm[sk].n, 'rematch')}, the model puts ${pct(m.playerRm[sk].r)} weight on them remembering the last meeting (replaying what won, or countering what beat them).</p>` : ''}
+      <div class="scroll"><table><thead><tr><th>Round</th><th>Played</th><th>Against</th><th>They could see</th><th>Result</th><th>Model's call</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <p class="meta">"They could see" is their opponent's formation from the round before. A ~ means that fight isn't logged, so it shows what the opponent played in this one. Each call uses only fights logged before it.</p>
+    </section>`;
+    return `<div class="grid-opp">${left}${right}</div>`;
+  }
+
+  /* ---------- Battle log ---------- */
+  function form() {
+    if (!S.form) {
+      const st = baseSettings(), rounds = S.battles.map((b) => +b.round).filter(isFinite);
+      S.form = { round: rounds.length ? String(Math.max.apply(null, rounds)) : '1', a: { name: st.me || '', s: st.myForm ? clone(st.myForm) : blank(), touched: false }, b: { name: '', s: blank(), touched: false }, win: '' };
+    }
+    return S.form;
+  }
+  function prefillSide(sd) {
+    const f = form(), s = f[sd];
+    if (s.touched || !s.name) return;
+    const pl = fullIndex().players[key(s.name)];
+    if (pl) s.s = clone(pl.entries[pl.entries.length - 1].form);
+    else if (key(s.name) === key(baseSettings().me) && baseSettings().myForm) s.s = clone(baseSettings().myForm);
+  }
+  function viewLog() {
+    const f = form();
+    // One copy of each fight; with several groups loaded, show your own group unless asked for all.
+    const G = groupInfo(), meK = key(settings().me), myR = G.ix.players[meK] ? G.comp[meK] : null;
+    const scoped = !S.logAll && G.roots.length > 1 && !!myR;
+    const list = G.ix.battles.filter((b) => !scoped || G.comp[key(b.a.name)] === myR).slice().sort((x, y) => (+y.round - +x.round) || String(y.created || '').localeCompare(String(x.created || '')));
+    const side = (sd, label) => `<div class="side${f.win === sd ? ' won' : ''}">
+      <div class="field"><label class="lbl" for="f-${sd}-name">${label}</label><input id="f-${sd}-name" type="text" list="dl-all" autocomplete="off" spellcheck="false" value="${esc(f[sd].name)}" placeholder="Player name"></div>
+      ${slots(sd, f[sd].s)}</div>`;
+    const add = `<section class="card" aria-labelledby="h-add"><div class="card-h"><h2 id="h-add">Add a battle report</h2><span class="aside">From the duel's Record screen</span></div>
+      <div class="row"><div class="field" style="width:120px"><label class="lbl" for="f-round">Round</label><input id="f-round" type="text" inputmode="decimal" value="${esc(f.round)}"></div>
+        <p class="meta" style="max-width:46ch">The qualifier fight number. Any number that goes up with time works, as long as everyone's fights use the same scale.</p></div>
+      <div class="sides">${side('a', 'Side A')}${side('b', 'Side B')}</div>
+      <div class="row"><span class="lbl">Winner</span><div class="seg" role="group" aria-label="Winner">
+        <button type="button" data-act="fwin" data-v="a" aria-pressed="${f.win === 'a'}">${esc(short(f.a.name || 'Side A'))}</button>
+        <button type="button" data-act="fwin" data-v="b" aria-pressed="${f.win === 'b'}">${esc(short(f.b.name || 'Side B'))}</button></div></div>
+      <div class="row"><button type="button" class="btn primary" data-act="fsave"${canAdd() ? '' : ' disabled'}>Save battle</button><span class="meta" role="status">${esc(canAdd() ? S.formMsg : 'You have view access. Ask the owner for Contributor access to add reports.')}</span></div>
+      <p class="meta">Side A stays filled after saving, so you can log the next fight from the same player's record.</p>
+    </section>`;
+    const shown = S.showAll ? list : list.slice(0, 60);
+    const rows = shown.map((b) => {
+      const n = E.normBattle(b);
+      if (!n) return '';
+      let del = '';
+      if (!isDemo() && b.id && canAdmin()) {
+        del = S.confirm === b.id
+          ? `<span class="row"><button type="button" class="btn small danger" data-act="del" data-id="${esc(b.id)}">Delete</button><button type="button" class="btn small" data-act="nodel">Keep</button></span>`
+          : `<button type="button" class="btn small" data-act="askdel" data-id="${esc(b.id)}" aria-label="Delete round ${esc(n.round)}, ${esc(n.a.name)} against ${esc(n.b.name)}">Delete</button>`;
+      }
+      const who = (sd) => `<div class="who"><span class="nm">${esc(n[sd].name)}</span>${n.win === sd ? '<span class="pill w">Won</span>' : ''}${orderHTML(n[sd].s)}</div>`;
+      return `<div class="b"><span class="rd" title="Round">${esc(n.round)}</span><div class="vs">${who('a')}${who('b')}</div>${del}</div>`;
+    }).join('');
+    const logCard = `<section class="card" aria-labelledby="h-list"><div class="card-h"><h2 id="h-list">Battles</h2><span class="row"><span class="aside">${list.length.toLocaleString()}${scoped ? ' in ' + esc(groupName(G, myR)) : ''}</span>${G.roots.length > 1 && myR ? `<button type="button" class="btn small" data-act="logall">${S.logAll ? 'Only my group' : 'All groups'}</button>` : ''}</span></div>
+      ${list.length ? `<div class="blist">${rows}</div>${list.length > shown.length ? `<button type="button" class="btn" data-act="all">Show all ${list.length}</button>` : ''}` : '<div class="empty">Nothing logged yet.</div>'}</section>`;
+    return `<div class="stack" style="gap:16px">${add}${logCard}</div>`;
+  }
+
+  /* ---------- Patterns ---------- */
+  function viewPatterns() {
+    const m = model();
+    const keys = Object.keys(m.obsBy).filter((k) => k !== m.meKey);
+    const all = [].concat.apply([], keys.map((k) => m.obsBy[k]));
+    if (!all.length) return '<div class="empty">Patterns appear once you’ve logged some battles.</div>';
+    const st = E.habitStats(all), W = wf(), r = (a, b) => (b ? pct(a / b) : '–');
+    const pop = `<section class="card"><div class="card-h"><h2>How your opponents decide</h2><span class="aside">${plural(all.length, 'fight')}, ${plural(keys.length, 'player')}</span></div>
+      <div class="stack">${tendRows(m.popW)}</div>
+      <div>${stat('Kept the same order as their previous fight', r(st.kept, st.withPrev))}
+        ${stat('Kept it after a win', r(st.keptAfterWin, st.afterWin))}
+        ${stat('Kept it after a loss', r(st.keptAfterLoss, st.afterLoss))}
+        ${stat(`Played the best counter to what they could see <span class="meta">(random picks would: ${r(st.counterChance, st.n)})</span>`, r(st.countered, st.n))}
+        ${stat('Led with their strongest squad', r(st.strongestFirst, st.n))}
+        ${st.rematch ? stat(`Rematches <span class="meta">(${st.rematch})</span>: replayed the order that won last time`, r(st.rmReplayed, st.rmWonPrev)) + stat('Rematches: countered the order that beat them last time', r(st.rmCountered, st.rmLostPrev)) + stat('Rematch memory, model weight', pct(m.popRm.r)) : ''}</div>
+      <p class="meta">New opponents start from this mix until their own fights say otherwise.</p></section>`;
+    const track = `<section class="card"><div class="card-h"><h2>Model track record</h2></div>
+      ${W.n ? `<div class="big-row"><span class="big-num">${pct(W.acc)}</span><span class="cap">of logged fights where the model's top pick was the order they actually played</span></div>
+        <div>${stat('Guessing they repeat their last order', pct(W.repeatAcc))}${W.rmN ? stat(`On rematches only <span class="meta">(${W.rmN})</span>`, pct(W.rmHits / W.rmN)) : ''}${stat('Blind guess', '17%')}${stat('Average odds it gave the order they played', pct(W.avgP))}</div>
+        <p class="meta">Each fight is called using only the fights before it, over ${plural(W.n, 'call')}.</p>` : '<p>Needs players with at least two logged fights.</p>'}</section>`;
+    const mine = m.obsBy[m.meKey] || [];
+    let me = '<section class="card"><div class="card-h"><h2>How readable you are</h2></div>';
+    if (mine.length >= 2) {
+      const ms = E.habitStats(mine), mw = wfMe();
+      me += `<div class="stack">${tendRows(m.playerW[m.meKey])}</div>
+        <div>${stat('You kept your previous order', r(ms.kept, ms.withPrev))}${mw && mw.n ? stat('The model would have called your order', pct(mw.acc)) : ''}</div>
+        <p class="meta">This is how your opponents' scouting sees you. If you're easy to read, the safe mix on Next fight keeps you hard to counter.</p>`;
+    } else {
+      me += `<p>Log at least two of your own fights${baseSettings().me ? '' : ' and set your name in Setup'} to see how predictable you are.</p>`;
+    }
+    me += '</section>';
+    const st2 = settings(), nb = isDemo() ? 0 : S.battles.length;
+    let tune = `<section class="card"><div class="card-h"><h2>Tune the fight simulator</h2></div>
+      <p>Right now a counter squad fights as if it had ${pct(+st2.bonus, 1)} more power, and real strength can drift about ${pct(+st2.sigma, 1)} from listed power.</p>`;
+    if (isDemo()) tune += '<p class="meta">Tuning works on your own battles, not the example data.</p>';
+    else if (nb < 8) tune += `<p class="meta">Log at least 8 battles to tune it (you have ${nb}).</p>`;
+    else tune += `<div><button type="button" class="btn" data-act="cal"${S.busy ? ' disabled' : ''}>${S.busy === 'cal' ? 'Tuning…' : 'Tune to my battles'}</button></div>`;
+    if (S.cal && !isDemo()) {
+      const c = S.cal, same = Math.abs(c.best.bonus - st2.bonus) < 1e-9 && Math.abs(c.best.sigma - st2.sigma) < 1e-9 && Math.abs((c.best.attr || 1.5) - (+st2.attr || 1.5)) < 1e-9;
+      tune += `<p>Best fit on ${c.level === 'encounter' ? `${plural(c.n, 'encounter')} from ${plural(c.battles, 'battle')}` : plural(c.n, 'battle')}: counter edge ${pct(c.best.bonus, 1)}, drift ${pct(c.best.sigma, 1)}. With those settings the stronger side wins ${pct(c.accuracy)} of the logged ${c.level === 'encounter' ? 'encounters' : 'fights'}.</p>
+        ${same ? '<p class="meta">The tracker already uses these settings.</p>' : canAdmin() ? '<div><button type="button" class="btn primary" data-act="calapply">Use these settings</button></div>' : '<p class="meta">Only the tracker\'s owner can change these settings.</p>'}`;
+    }
+    tune += '</section>';
+    return `<div class="grid2"><div class="stack" style="gap:16px">${pop}${me}</div><div class="stack" style="gap:16px">${track}${tune}</div></div>`;
+  }
+
+  /* ---------- Setup ---------- */
+  function exportJSON() {
+    return JSON.stringify(S.battles.map((b) => { const n = E.normBattle(b); return n ? Object.assign({ round: n.round }, n.g ? { g: n.g } : {}, { a: n.a, b: n.b, win: n.win }, n.e ? { e: n.e } : {}) : null; }).filter(Boolean));
+  }
+  function viewSetup() {
+    const st = S.shared, ro = canAdmin() ? '' : ' disabled';
+    const privacy = S.store !== 'db' ? 'Saved in this browser.' : S.personalStore === 'db' ? 'Only you see these. Each teammate sets their own.' : 'Saved in this browser only.';
+    const mine = isDemo() ? null : myLog();
+    let squads;
+    if (mine && !valid(S.personal.myForm)) {
+      squads = `<div class="lbl"><span>Your squads</span><span class="hint">From your round ${esc(mine.round)} battle report</span></div>
+      <div>${orderHTML(mine.form)}</div>
+      <p class="meta">These update by themselves when newer reports are imported. Power changed since then? <button type="button" class="linkbtn" data-act="mehand">Enter squads by hand</button></p>`;
+    } else {
+      const d = draftOf('me');
+      squads = `<div class="lbl"><span>Your squads, in your current order</span><span class="hint">Slot 1 fights first</span></div>
+      ${slots('me', d)}
+      <p class="meta">${valid(d) ? 'Saved.' : 'Enter type and power for all three squads.'} Use each squad's power as the game shows it (hero power, without troops), and update it after you re-save your duel formation.${mine ? ' <button type="button" class="linkbtn" data-act="melog">Use my latest battle report instead</button>' : ''}</p>`;
+    }
+    const you = `<section class="card" aria-labelledby="h-me"><div class="card-h"><h2 id="h-me">You</h2><span class="aside">${privacy}</span></div>
+      <div class="field"><label class="lbl" for="${isDemo() ? 'me-name' : 'set-me'}">Your name in the duel</label>${meSelect('set-me')}
+        <p class="meta">Battles under this name count as yours, so the tracker knows what opponents have seen of you.</p></div>
+      ${squads}</section>`;
+    const sim = `<section class="card" aria-labelledby="h-sim"><div class="card-h"><h2 id="h-sim">Fight simulator</h2></div>
+      <div class="three">
+        <div class="field"><label class="lbl" for="set-bonus">Counter edge, %</label><input id="set-bonus" type="text" inputmode="decimal" value="${+(st.bonus * 100).toFixed(1)}"${ro}><p class="meta">A squad whose type beats its opponent's fights as if it had this much more power.</p></div>
+        <div class="field"><label class="lbl" for="set-sigma">Hidden strength, ± %</label><input id="set-sigma" type="text" inputmode="decimal" value="${+(st.sigma * 100).toFixed(1)}"${ro}><p class="meta">How far real strength can drift from listed power (heroes, gear, skills).</p></div>
+        <div class="field"><label class="lbl" for="set-sims">Simulations per matchup</label><select id="set-sims"${ro}>${[800, 1500, 3000].map((n) => `<option value="${n}"${+st.sims === n ? ' selected' : ''}>${n.toLocaleString()}</option>`).join('')}</select><p class="meta">More is steadier but slower.</p></div>
+      </div>${canAdmin() ? '' : '<p class="meta">These are shared by the whole team. Only the tracker\'s owner can change them.</p>'}</section>`;
+    const team = S.store !== 'db' ? '' : `<section class="card" aria-labelledby="h-team"><div class="card-h"><h2 id="h-team">Team</h2></div><div class="prose">
+      <p>Everyone you share this page with sees the same battle log and opponent profiles. ${S.bundle.length ? `Battle reports from all ${groupInfo().roots.length} qualifier groups are built in, so most players can find their own name. ` : ''}Each teammate picks their own name once on Next fight, and their squads fill in from their latest battle report. Names stay private to each person, so everyone gets calls for their own fights.</p>
+      ${S.isOwner ? '<p>To add teammates, use Share on this page in claude.ai. Give them Contributor access so they can add battle reports and keep their name saved wherever they open the page. Viewers can scout too, but their name is saved in their browser only and they can\'t add reports.</p>'
+        : canAdd() ? '<p>You can add battle reports to the shared log. Only the owner can delete battles or change the fight simulator.</p>'
+        : '<p>You have view access: you can scout, your name is saved in this browser only, and you can\'t add reports. Ask the owner for Contributor access to add reports.</p>'}</div></section>`;
+    const data = `<section class="card" aria-labelledby="h-data"><div class="card-h"><h2 id="h-data">Data</h2><span class="aside">${plural(S.battles.length, 'battle')} logged here${S.bundle.length ? `, ${S.bundle.length.toLocaleString()} from reports` : ''}</span></div>
+      <div class="field"><span class="lbl">Export</span>
+        <div class="row"><button type="button" class="btn" data-act="copy">Copy all battles</button>${S.showExport ? '' : '<button type="button" class="btn" data-act="showexp">Show</button>'}<span class="meta" role="status">${esc(S.copyMsg)}</span></div>
+        ${S.showExport ? `<textarea id="exp" readonly aria-label="Exported battles">${esc(exportJSON())}</textarea>` : ''}</div>
+      <div class="field"><label class="lbl" for="imp">Import battles</label><textarea id="imp" placeholder='[{"round":3,"a":{"name":"Kestrel","s":[{"t":"T","p":48.2},{"t":"A","p":45.1},{"t":"M","p":40.3}]},"b":{"name":"Odin","s":[{"t":"A","p":50.0},{"t":"M","p":44.2},{"t":"T","p":39.8}]},"win":"a"}]'>${esc(S.importText)}</textarea>
+        <div class="row"><button type="button" class="btn primary" data-act="import"${S.busy ? ' disabled' : ''}>${S.busy === 'import' ? 'Importing…' : 'Import'}</button><span class="meta" role="status">${esc(S.importMsg)}</span></div>
+        <p class="meta">Paste a list of battles in the format above. Battles already logged are skipped.</p></div>
+      <div class="row">${S.wipe ? `<span>Delete all ${plural(S.battles.length, 'battle')}? This can't be undone.</span><button type="button" class="btn danger" data-act="wipe2"${S.busy ? ' disabled' : ''}>Delete everything</button><button type="button" class="btn" data-act="wipe0">Keep them</button>` : `${canAdmin() ? `<button type="button" class="btn danger" data-act="wipe1"${S.battles.length ? '' : ' disabled'}>Delete all battles</button>` : ''}`}</div>
+    </section>`;
+    const how = `<section class="card" aria-labelledby="h-how"><div class="card-h"><h2 id="h-how">How the tracker works</h2></div><div class="prose">
+      <p>Each encounter, both sides send the next squad in line. The winner goes to the back of its line with the troops it has left; the loser is out. The fight ends when one side has no squads left, so it takes 3 to 5 encounters. This rule matched every one of 391 encounters in real battle reports.</p>
+      <p>The simulator plays all 36 pairings of your order against theirs, ${(+st.sims || 1500).toLocaleString()} times each, letting every squad's real strength drift about ${pct(+st.sigma, 1)} from its listed power. A squad whose type beats its opponent's (Tank beats Missile, Missile beats Aircraft, Aircraft beats Tank) fights as if it had ${pct(+st.bonus, 1)} more power. Both numbers were fitted to real encounters: power decides almost everything, and the counter edge is small.</p>
+      <p>To predict an opponent, the tracker replays their logged fights against six habits: repeating their last order, leading with their strongest squad, countering the formation they could see, keeping a winning order and changing a losing one, second-guessing, and picking at random. It learns how much of each habit that player shows. Players with only a few fights lean on how everyone in your log behaves.</p>
+      <p>When you meet someone again, they know exactly what you played against them last time. The tracker adds a seventh habit for rematches: replay the order that won, or counter the order that beat them. It learns how often each player does that.</p>
+      <p>The call is the order that wins most often against that prediction. The safe mix is the game-theory answer: odds that guarantee a minimum win chance whatever they play, for when you'd rather not be read.</p>
+      <p>Anyone with Contributor access can log battle reports here, and the owner can ask Claude to import whole groups straight from the duel's battle reports.</p></div></section>`;
+    return `<div class="grid2"><div class="stack" style="gap:16px">${you}${team}${sim}</div><div class="stack" style="gap:16px">${data}${how}</div></div>`;
+  }
+
+  const VIEW = { next: viewNext, opponents: viewOpponents, log: viewLog, patterns: viewPatterns, setup: viewSetup };
+
+  /* ---------- actions ---------- */
+  async function saveForm() {
+    const f = form(), r = parseFloat(f.round), a = valid(f.a.s), b = valid(f.b.s);
+    const an = (f.a.name || '').trim(), bn = (f.b.name || '').trim();
+    let err = '';
+    if (!isFinite(r)) err = 'Enter the round number.';
+    else if (!an || !bn) err = 'Enter both player names.';
+    else if (key(an) === key(bn)) err = 'The two sides need different names.';
+    else if (!a || !b) err = 'Enter type and power for all six squads.';
+    else if (f.win !== 'a' && f.win !== 'b') err = 'Pick who won.';
+    if (err) { S.formMsg = err; render(); return; }
+    const battle = { round: r, a: { name: an, s: a }, b: { name: bn, s: b }, win: f.win, note: '', created: new Date().toISOString() };
+    const k = E.battleKey(battle);
+    if (S.battles.some((x) => { const n = E.normBattle(x); return n && E.battleKey(n) === k; })) { S.formMsg = `Round ${r}, ${an} against ${bn}, is already logged.`; render(); return; }
+    try {
+      await addBattles([battle]);
+      S.formMsg = `Saved round ${r}: ${an} against ${bn}.`;
+      f.b = { name: '', s: blank(), touched: false }; f.win = '';
+    } catch (e) { S.formMsg = errText(e); }
+    render();
+  }
+  async function doImport() {
+    let data;
+    try { data = JSON.parse(S.importText); } catch (e) { S.importMsg = 'That isn’t valid JSON. Paste exactly what was exported, or what Claude gave you.'; render(); return; }
+    const arr = Array.isArray(data) ? data : (data && Array.isArray(data.battles) ? data.battles : null);
+    if (!arr) { S.importMsg = 'Expected a list of battles.'; render(); return; }
+    // An older copy of a fight that doesn't know its group is replaced by an imported copy that does.
+    const have = new Map(), ids = new Set();
+    S.battles.forEach((x) => { ids.add(x.id); const n = E.normBattle(x); if (n) have.set(E.battleKey(n), { id: x.id, g: !!n.g }); });
+    S.bundle.forEach((x) => { if (x._id != null) ids.add(String(x._id)); const n = E.normBattle(x); if (n) have.set(E.battleKey(n), { id: null, g: true }); });
+    const add = [], stale = []; let bad = 0, dup = 0;
+    arr.forEach((raw) => {
+      const n = E.normBattle(raw);
+      if (!n) { bad++; return; }
+      const k = E.battleKey(n), old = have.get(k), rid = raw._id != null ? String(raw._id).replace(/[^\w-]/g, '_') : '';
+      if ((old && (old.g || !n.g)) || (rid && ids.has(rid))) { dup++; return; }
+      if (old && old.id) stale.push(old.id);
+      have.set(k, { id: rid || null, g: !!n.g });
+      const doc = { round: n.round, a: n.a, b: n.b, win: n.win, note: n.note || '', created: new Date().toISOString() };
+      if (n.g) doc.g = n.g;
+      if (n.e) doc.e = n.e;
+      if (rid) doc._id = rid;
+      add.push(doc);
+    });
+    if (!add.length) { S.importMsg = `Nothing new to add (${dup} already logged, ${bad} unreadable).`; render(); return; }
+    S.importText = ''; S.busy = 'import'; render();
+    let shown = 0, removed = 0;
+    try {
+      await addBattles(add, (i, n) => { if (i === n || Date.now() - shown > 700) { shown = Date.now(); S.importMsg = `Saving ${i} of ${n}…`; render(); } });
+      if (stale.length && canAdmin()) {
+        if (S.store === 'db') { for (const id of stale) { try { await retrying(() => S.db.doc('battles/' + id).delete()); removed++; } catch (e) { /* the newer copy is used anyway */ } } }
+        else { const st = new Set(stale); S.battles = S.battles.filter((x) => !st.has(x.id)); removed = stale.length; saveLocal(); }
+      }
+      S.importMsg = `Imported ${plural(add.length, 'battle')}${dup ? `, skipped ${dup} already logged` : ''}${removed ? `, replaced ${removed} older ${removed === 1 ? 'copy' : 'copies'}` : ''}${bad ? `, ${bad} unreadable` : ''}.`;
+    } catch (e) { S.importMsg = errText(e); }
+    S.busy = ''; bump(); render();
+  }
+  async function wipeAll() {
+    S.busy = 'wipe'; render();
+    try {
+      if (S.store === 'db') { for (const b of S.battles.slice()) await S.db.doc('battles/' + b.id).delete(); }
+      else { S.battles = []; saveLocal(); bump(); }
+    } catch (e) { showErr(e); }
+    S.busy = ''; S.wipe = 0; render();
+  }
+
+  document.addEventListener('click', async (ev) => {
+    const el = ev.target.closest('[data-act]');
+    if (!el) return;
+    const a = el.dataset.act;
+    if (a === 'real') { S.forceReal = true; location.hash = '#setup'; render(); }
+    else if (a === 'dismiss') { S.note = ''; S.noteErr = false; render(); }
+    else if (a === 'opp') { setOpp(el.dataset.name); S.oppOpen = false; render(); }
+    else if (a === 'oedit') { S.oppOpen = !S.oppOpen; render(); }
+    else if (a === 'melog') { S.personal.myForm = null; S.meDraft = null; S.shownPerm = null; S.roll = null; savePersonal(); render(); }
+    else if (a === 'mehand') {
+      const lf = myLog();
+      if (lf) { S.meDraft = clone(lf.form); S.personal.myForm = valid(S.meDraft); S.shownPerm = null; S.roll = null; savePersonal(); }
+      render();
+    }
+    else if (a === 'type') { const d = draftOf(el.dataset.target); if (d) { d[+el.dataset.slot].t = el.dataset.t; afterDraft(el.dataset.target); render(); } }
+    else if (a === 'ores') { S.oppResult = el.dataset.v || null; S.roll = null; render(); }
+    else if (a === 'oreset') { setOpp(S.opp); S.oppOpen = false; render(); }
+    else if (a === 'roll') {
+      const mf = myForm(), of = valid(S.oppForm);
+      if (!mf || !of) return;
+      const mc = E.canonical(mf).canon, ds = defaultShown(mf);
+      const pr = E.predict(model(), { opp: S.opp, oppForm: S.oppEdited ? of : null, oppLastResult: S.oppResult, myForm: mf, myShown: E.orderSquads(mc, S.shownPerm != null ? S.shownPerm : ds.k) });
+      const x = Math.random(); let s = 0, pick = 5;
+      for (let k = 0; k < 6; k++) { s += pr.nash.row[k]; if (x <= s) { pick = k; break; } }
+      S.roll = pick; render();
+    }
+    else if (a === 'sel') { S.sel = el.dataset.k; render(); }
+    else if (a === 'scout') { setOpp(el.dataset.name); S.oppOpen = false; location.hash = '#next'; render(); }
+    else if (a === 'fwin') { form().win = el.dataset.v; render(); }
+    else if (a === 'fsave') { saveForm(); }
+    else if (a === 'askdel') { S.confirm = el.dataset.id; render(); }
+    else if (a === 'nodel') { S.confirm = null; render(); }
+    else if (a === 'del') { const id = el.dataset.id; S.confirm = null; try { await deleteBattle(id); } catch (e) { showErr(e); } render(); }
+    else if (a === 'all') { S.showAll = true; render(); }
+    else if (a === 'logall') { S.logAll = !S.logAll; S.showAll = false; render(); }
+    else if (a === 'cal') {
+      S.busy = 'cal'; render();
+      setTimeout(() => { try { S.cal = E.calibrate(battles(), settings()); } catch (e) { S.cal = null; } S.busy = ''; render(); }, 40);
+    }
+    else if (a === 'calapply' && S.cal && canAdmin()) { S.shared.bonus = S.cal.best.bonus; S.shared.sigma = S.cal.best.sigma; if (S.cal.best.attr) S.shared.attr = S.cal.best.attr; saveShared(); render(); }
+    else if (a === 'copy') {
+      try { await navigator.clipboard.writeText(exportJSON()); S.copyMsg = 'Copied.'; render(); }
+      catch (e) {
+        S.showExport = true; S.copyMsg = 'Copying was blocked. The text is selected, so copy it yourself.'; render();
+        setTimeout(() => { const t = document.getElementById('exp'); if (t) { t.focus(); t.select(); } }, 80);
+      }
+    }
+    else if (a === 'import') { doImport(); }
+    else if (a === 'showexp') { S.showExport = true; render(); }
+    else if (a === 'wipe1') { S.wipe = 1; render(); }
+    else if (a === 'wipe0') { S.wipe = 0; render(); }
+    else if (a === 'wipe2' && canAdmin()) { wipeAll(); }
+  });
+
+  const isPick = (ev) => ev.inputType === 'insertReplacementText' || ev.inputType == null;
+  document.addEventListener('input', (ev) => {
+    const t = ev.target;
+    if (t.dataset && t.dataset.target && t.dataset.slot != null) { const d = draftOf(t.dataset.target); if (d) d[+t.dataset.slot].p = t.value; return; }
+    if (t.id === 'opp-name') {
+      S.oppText = t.value;
+      if (isPick(ev) && fullIndex().players[key(t.value)]) { setOpp(t.value); render(); }
+      return;
+    }
+    if (t.id === 'f-round') { form().round = t.value; return; }
+    if (t.id === 'f-a-name' || t.id === 'f-b-name') {
+      const sd = t.id.charAt(2); form()[sd].name = t.value;
+      if (isPick(ev) && fullIndex().players[key(t.value)]) { prefillSide(sd); render(); }
+      return;
+    }
+    if (t.id === 'me-name') { S.meText = t.value; return; }
+    if (t.id === 'imp') { S.importText = t.value; }
+  });
+  document.addEventListener('change', (ev) => {
+    const t = ev.target;
+    if (t.id === 'me-pick' || t.id === 'set-me') {
+      if (t.value === OTHER) { S.meManual = true; S.meText = null; render(); focusSoon('me-name'); return; }
+      pickMe(t.value); return;
+    }
+    if (t.id === 'me-name') {
+      const v = t.value.trim(); S.meText = null;
+      if (v && fullIndex().players[key(v)]) { pickMe(v); return; }
+      if (key(v) !== key(baseSettings().me)) { S.shownPerm = null; S.roll = null; S.form = null; }
+      // A typed name that isn't in the log keeps the box open by itself, so the flag is only for the empty moment.
+      S.personal.me = v; S.meManual = false; savePersonal(); render(); return;
+    }
+    if (t.id === 'opp-pick') {
+      if (t.value === OTHER) {
+        Object.assign(S, { oppManual: true, opp: '', oppText: null, oppForm: blank(), oppEdited: true, oppResult: null, oppVersion: S.version, roll: null });
+        render(); focusSoon('opp-name'); return;
+      }
+      setOpp(t.value); S.oppOpen = false; render(); return;
+    }
+    if (t.id === 'opp-name') {
+      const v = t.value.trim();
+      if (v && fullIndex().players[key(v)]) setOpp(v);
+      else Object.assign(S, { opp: v, oppText: null, oppManual: true, oppEdited: true, oppVersion: S.version, roll: null, oppForm: S.oppForm || blank() });
+      render(); return;
+    }
+    if (t.dataset && t.dataset.target && t.dataset.slot != null) {
+      const d = draftOf(t.dataset.target);
+      if (d) { d[+t.dataset.slot].p = t.value.trim(); afterDraft(t.dataset.target); render(); }
+      return;
+    }
+    if (t.id === 'shown') { S.shownPerm = +t.value; S.roll = null; render(); return; }
+    if (t.id === 'f-round') { form().round = t.value; return; }
+    if (t.id === 'f-a-name' || t.id === 'f-b-name') { const sd = t.id.charAt(2); form()[sd].name = t.value.trim(); prefillSide(sd); render(); return; }
+    if (!canAdmin() && /^set-(bonus|sigma|sims)$/.test(t.id)) { render(); return; }
+    if (t.id === 'set-bonus') { const v = parseFloat(t.value); if (isFinite(v) && v >= 0 && v <= 100) { S.shared.bonus = v / 100; saveShared(); } render(); return; }
+    if (t.id === 'set-sigma') { const v = parseFloat(t.value); if (isFinite(v) && v >= 0.5 && v <= 60) { S.shared.sigma = v / 100; saveShared(); } render(); return; }
+    if (t.id === 'set-sims') { S.shared.sims = +t.value; saveShared(); render(); return; }
+    if (t.id === 'imp') { S.importText = t.value; }
+  });
+
+  /* ---------- battle reports shipped with the page ---------- */
+  async function loadBundle() {
+    try {
+      const r = await fetch('data/reports.json', { cache: 'no-cache' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const arr = await r.json();
+      S.bundle = Array.isArray(arr) ? arr.filter((b) => b && b.a && b.b) : [];
+      S.bundleState = S.bundle.length ? 'ok' : 'none';
+    } catch (e) { S.bundle = []; S.bundleState = 'none'; }
+    bump(); render();
+  }
+
+  /* ---------- boot ---------- */
+  function fromHash() { const h = (location.hash || '').slice(1); S.view = VIEWS.indexOf(h) >= 0 ? h : 'next'; }
+  window.addEventListener('hashchange', () => { fromHash(); render(); });
+  const HOT_KEYS = ['view', 'opp', 'oppForm', 'oppEdited', 'oppResult', 'oppManual', 'oppOpen', 'shownPerm', 'sel', 'forceReal'];
+  function snapshotState() { const o = {}; HOT_KEYS.forEach((k) => { o[k] = S[k]; }); return JSON.parse(JSON.stringify(o)); }
+  function start(hot) {
+    if (hot && typeof hot === 'object') HOT_KEYS.forEach((k) => { if (k in hot && k !== 'view') S[k] = hot[k]; });
+    fromHash(); draw(); initStore(); loadBundle();
+  }
+  const hot = window.claude && window.claude.hot;
+  try { if (hot && typeof hot.snapshot === 'function') hot.snapshot(snapshotState); } catch (e) { /* ignore */ }
+  if (hot && typeof hot.ready === 'function') hot.ready(start); else start((hot && hot.data) || {});
+})();
+
+</script>
+</body>
+</html>
