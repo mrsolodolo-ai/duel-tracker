@@ -1925,11 +1925,12 @@ details[open] > summary { margin-bottom: 10px; }
       if (!e.won && Math.max(best, ov ? ov.chance : 0) < 0.35) tags.push('outmatched');
       if (!e.won && played >= 0.6) tags.push('unlucky');
       if (e.won && played < 0.4) tags.push('lucky');
-      // Lost on power: how much more power, spread over all three squads, would have made it an even fight.
+      // Lost on power: how much more power on your two strongest squads would have made it an even fight.
       let even = null;
       if (tags.includes('outmatched')) {
+        const top2 = e.form.map((q, i) => i).sort((i, j) => e.form[j].p - e.form[i].p).slice(0, 2);
         const at = (s) => {
-          const c = E.canonical(e.form.map((q) => (q.id != null ? { t: q.t, p: q.p * s, id: q.id } : { t: q.t, p: q.p * s })));
+          const c = E.canonical(e.form.map((q, i) => { const p = top2.includes(i) ? q.p * s : q.p; return q.id != null ? { t: q.t, p, id: q.id } : { t: q.t, p }; }));
           const W4 = E.winMatrix(c.canon, theirs.canon, opt);
           return W4[colBest(W4, theirs.perm)][theirs.perm];
         };
@@ -2004,24 +2005,20 @@ details[open] > summary { margin-bottom: 10px; }
     if (out.length) {
       const line = (r) => {
         const e = r.e, mp = sumP(e.form), tp = sumP(e.oppForm), minT = Math.min(...e.oppForm.map((q) => q.p)), maxM = Math.max(...e.form.map((q) => q.p));
+        const top2p = e.form.map((q) => q.p).sort((a, b) => b - a).slice(0, 2).reduce((a, b) => a + b, 0);
         let s = `Their squads had ${fmtM(tp)} in total, yours ${fmtM(mp)}. Your best order had ${chanceOf(Math.max(r.best, r.ov ? r.ov.chance : 0))}`;
-        s += r.even === Infinity ? '; even double your power would not have been enough.' : r.even ? `; about ${fmtM(mp * (r.even - 1))} more power would have made it an even fight.` : '.';
+        s += r.even === Infinity ? '; even doubling your two strongest squads would not have been enough.' : r.even ? `; about ${fmtM(top2p * (r.even - 1))} more power on your two strongest squads would have made it an even fight.` : '.';
         if (minT > maxM) s += ` Even their weakest squad (${fmtM(minT)}) was stronger than your strongest (${fmtM(maxM)}).`;
         return s;
       };
       tips.push(out.length === 1
-        ? { hot: false, h: `${who(out[0].e)}: lost on power, no order would have won`, p: `${line(out[0])} This needs more squad power, not a new order.` }
-        : { hot: false, h: `${plural(out.length, 'loss')} on power: no order would have won these`, list: out.map((r) => `${whoH(r.e)}: ${esc(line(r))}`), p2: 'These need more squad power, not a new order.' });
+        ? { hot: false, h: `${who(out[0].e)}: lost on power, no order would have won`, p: `${line(out[0])} This needs more power on your strongest squads, not a new order.` }
+        : { hot: false, h: `${plural(out.length, 'loss')} on power: no order would have won these`, list: out.map((r) => `${whoH(r.e)}: ${esc(line(r))}`), p2: 'These need more power on your strongest squads, not a new order.' });
     }
-    // 4. Squads: the weakest one, and any that keep losing encounters they should win.
+    // 4. Your two strongest squads: flag one that keeps losing encounters it should win.
     const recs = squadRecords(rows, bonus), rec = (q) => (q.id != null ? recs[String(q.id)] : null);
-    const ps = lf.map((q) => q.p), mx = Math.max(...ps), mn = Math.min(...ps);
-    if (mn < 0.7 * mx) {
-      const weak = lf[ps.indexOf(mn)], strong = lf[ps.indexOf(mx)], rw = rec(weak), rs = rec(strong);
-      tips.push({ hot: false, h: `Build up your ${sqName(weak, lf)} squad (${fmtM(weak.p)})`,
-        p: `It's ${pct(1 - mn / mx)} behind your ${sqName(strong, lf)} squad (${fmtM(strong.p)}).${rw && rs && rw.n && rs.n && rw.w / rw.n < rs.w / rs.n ? ` It won ${rw.w} of its ${plural(rw.n, 'encounter')}; your ${sqName(strong, lf)} squad won ${rs.w} of ${rs.n}.` : ''} When you lose, all three squads have fought, so a weak squad costs close fights.` });
-    }
-    lf.forEach((q) => {
+    const top2 = lf.slice().sort((x, y) => y.p - x.p).slice(0, 2);
+    top2.forEach((q) => {
       const r = rec(q);
       if (!r || r.upsets.length < 2) return;
       const ex = r.upsets.slice().sort((a, b) => b.edge - a.edge).slice(0, 3).map((u) => `${who(u.r.e)} (to their ${TN(u.x.theirs.t)} ${fmtM(u.x.theirs.p)}${u.x.tf < 0.95 ? ` with ${pct(u.x.tf)} of its troops left` : ''})`);
