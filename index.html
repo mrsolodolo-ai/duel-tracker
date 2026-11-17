@@ -60,6 +60,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .brand h1 { font-family: var(--display); font-weight: 800; font-size: 34px; line-height: .95; letter-spacing: .02em; text-transform: uppercase; }
 .brand .sub { font-family: var(--cond); font-weight: 600; font-size: 13px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
 .status { font-family: var(--cond); font-weight: 600; font-size: 13px; letter-spacing: .04em; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--panel); white-space: nowrap; }
+.top-right { display: flex; align-items: center; gap: 10px; }
+.logout { font-family: var(--cond); font-weight: 600; font-size: 13px; letter-spacing: .04em; background: none; border: 0; padding: 4px 2px; color: var(--muted); text-decoration: underline; cursor: pointer; }
+.logout:hover { color: var(--ink); }
 .status.ok { color: var(--win); border-color: color-mix(in oklab, var(--win) 40%, var(--line)); }
 .status.warn { color: var(--msl); border-color: color-mix(in oklab, var(--msl) 45%, var(--line)); }
 
@@ -223,7 +226,7 @@ details[open] > summary { margin-bottom: 10px; }
       <h1>Duel Tracker</h1>
       <span class="sub">Last War · Champion Duel qualifier scouting</span>
     </div>
-    <span id="status" class="status" role="status">Connecting…</span>
+    <span class="top-right"><span id="status" class="status" role="status">Connecting…</span><button type="button" id="logout" class="logout" hidden>Log out</button></span>
   </header>
   <nav class="tabs" aria-label="Sections">
     <a href="#next" data-view="next">Next fight</a>
@@ -1101,10 +1104,11 @@ details[open] > summary { margin-bottom: 10px; }
   const option = (v, label, sel, dis) => `<option value="${esc(v)}"${sel ? ' selected' : ''}${dis ? ' disabled' : ''}>${esc(label)}</option>`;
   // Players from other alliances who are listed in the "your alliance" section too.
   const EXTRA_MATES = ['Ali ᚢ'];
-  // Your alliance: the tracker owner's tag, or your own once you have picked your name.
+  // "You" lists only the tracker owner's alliance (ROaR) plus EXTRA_MATES; anyone else types their name.
+  const HOME_TAG = 'ROaR';
   function teamAlliance() {
-    const P = fullIndex().players, o = P[key(S.shared.me)] || P[key(settings().me)];
-    return o && o.al ? o.al : '';
+    const o = fullIndex().players[key(S.shared.me)];
+    return o && o.al ? o.al : HOME_TAG;
   }
   const SELC = {};
   function memoSel(id, k, build) { const c = SELC[id]; if (c && c.k === k) return c.html; const html = build(); SELC[id] = { k, html }; return html; }
@@ -1112,21 +1116,17 @@ details[open] > summary { margin-bottom: 10px; }
     const dm = isDemo(), me = settings().me, meK = key(me);
     // With only example fights there are no real names to pick, so Setup takes a typed name.
     if (dm && id === 'set-me') return `<input id="me-name" type="text" autocomplete="off" spellcheck="false" value="${esc(S.meText != null ? S.meText : baseSettings().me)}" placeholder="Exactly as it appears in battle reports">`;
-    const P = fullIndex().players, inLog = !!(me && P[meK]);
+    const P = fullIndex().players, team = teamAlliance();
+    const extra = new Set(EXTRA_MATES.map(key));
+    const isMate = (p) => p.al === team || extra.has(p.key);
+    // A saved name from outside the alliance shows in the typed-name box instead.
+    const inLog = !!(me && P[meK] && isMate(P[meK]));
     const manual = !dm && (S.meManual || (!!me && !inLog));
-    const team = teamAlliance();
     const opts = memoSel(id, [FIK, meK, inLog, manual, team].join('|'), () => {
       const G = groupInfo(), many = G.roots.length > 1;
-      let done = false;
-      const opt = (p, label) => { const sel = !done && !manual && inLog && p.key === meK; if (sel) done = true; return option(p.name, label || p.name, sel); };
-      const sorted = (ps) => ps.sort((x, y) => byName(x.name, y.name));
-      const all = Object.values(P);
+      const mates = Object.values(P).filter(isMate).sort((x, y) => byName(x.name, y.name));
       let o = option('', 'Pick your name', !inLog || manual, true);
-      const extra = new Set(EXTRA_MATES.map(key));
-      const mates = team ? sorted(all.filter((p) => p.al === team || extra.has(p.key))) : [];
-      if (mates.length) o += `<optgroup label="${esc(team)} · your alliance">${mates.map((p) => opt(p, many && G.label[G.comp[p.key]] ? `${p.name} · ${G.label[G.comp[p.key]]}` : p.name)).join('')}</optgroup>`;
-      if (many) G.roots.forEach((r) => { o += `<optgroup label="${esc(groupName(G, r))}">${sorted(all.filter((p) => G.comp[p.key] === r)).map((p) => opt(p)).join('')}</optgroup>`; });
-      else o += (mates.length ? '<optgroup label="Everyone">' : '') + sorted(all).map((p) => opt(p)).join('') + (mates.length ? '</optgroup>' : '');
+      if (mates.length) o += `<optgroup label="${esc(team)} · your alliance">${mates.map((p) => option(p.name, many && G.label[G.comp[p.key]] ? `${p.name} · ${G.label[G.comp[p.key]]}` : p.name, !manual && inLog && p.key === meK)).join('')}</optgroup>`;
       if (!dm) o += option(OTHER, 'I’m not on this list', manual);
       return o;
     });
@@ -1896,9 +1896,15 @@ details[open] > summary { margin-bottom: 10px; }
   /* ---------- battle reports shipped with the page ---------- */
   async function loadBundle() {
     try {
-      const r = await fetch('data/reports.json', { cache: 'no-cache' });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      const arr = await r.json();
+      // The password-protected website carries the reports inside the unlocked page itself.
+      const inline = document.getElementById('bundled-reports');
+      let arr;
+      if (inline) arr = JSON.parse(inline.textContent);
+      else {
+        const r = await fetch('data/reports.json', { cache: 'no-cache' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        arr = await r.json();
+      }
       S.bundle = Array.isArray(arr) ? arr.filter((b) => b && b.a && b.b) : [];
       S.bundleState = S.bundle.length ? 'ok' : 'none';
     } catch (e) { S.bundle = []; S.bundleState = 'none'; }
@@ -1906,6 +1912,11 @@ details[open] > summary { margin-bottom: 10px; }
   }
 
   /* ---------- boot ---------- */
+  // Password-protected website only: the unlock page defines lwduelLogout.
+  (function () {
+    const b = document.getElementById('logout');
+    if (b && typeof window.lwduelLogout === 'function') { b.hidden = false; b.addEventListener('click', () => window.lwduelLogout()); }
+  })();
   function fromHash() { const h = (location.hash || '').slice(1); S.view = VIEWS.indexOf(h) >= 0 ? h : 'next'; }
   window.addEventListener('hashchange', () => { fromHash(); render(); });
   const HOT_KEYS = ['view', 'opp', 'oppForm', 'oppEdited', 'oppResult', 'oppManual', 'oppOpen', 'shownPerm', 'sel', 'forceReal'];
