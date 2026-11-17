@@ -71,6 +71,12 @@ tr.best td { font-weight: 700; }
 .tip.hot { border-left-color: var(--loss); }
 .tip h3 { font-size: 15px; font-weight: 700; margin: 0; }
 .tip p { margin: 0; font-size: 14px; }
+.tip-list { margin: 4px 0 0; padding-left: 18px; font-size: 14px; display: flex; flex-direction: column; gap: 4px; }
+.tip-rows { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.tip-row { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; }
+.tip-row > .k { color: var(--muted); font-size: 13px; min-width: 112px; }
+.tip-row > .k b { color: var(--ink); font-size: 14px; }
+.tip-row.better > .k, .tip-row.better > .k b { color: var(--win); font-weight: 700; }
 .ins-fight { border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 6px; }
 .ins-fight:first-child { border-top: 0; padding-top: 0; }
 .ins-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
@@ -632,7 +638,7 @@ details[open] > summary { margin-bottom: 10px; }
         if (b.g) P.g = b.g;
         if (me.al) P.al = me.al;
         if (me.sv != null) P.sv = me.sv;
-        players[k].entries.push({ round: b.round, form: me.s, oppKey: keyOf(op.name), oppName: op.name, oppForm: op.s, won: b.win === side, battleId: b.id, ex: extrasOf(me), oppEx: extrasOf(op) });
+        players[k].entries.push({ round: b.round, form: me.s, oppKey: keyOf(op.name), oppName: op.name, oppForm: op.s, won: b.win === side, battleId: b.id, ex: extrasOf(me), oppEx: extrasOf(op), enc: b.e || null, side: side });
       });
     });
     return { battles: list, players: players };
@@ -1852,10 +1858,47 @@ details[open] > summary { margin-bottom: 10px; }
 
   /* ---------- Insights: where a player's own choices likely cost them ---------- */
   const INS = { k: '', v: null, busy: false };
+  const colBest = (W, j) => { let b = 0; for (let i = 1; i < 6; i++) if (W[i][j] > W[b][j] + 1e-9) b = i; return b; };
+  const TN = (t) => (t === 'X' ? 'mixed' : E.TYPE_NAME[t]);
+  const fmtM = (p) => `${fmtP(p)}M`;
+  const sumP = (form) => form.reduce((n, q) => n + q.p, 0);
+  // "a 30% chance", "an 80% chance"
+  const aP = (x) => { const s = pct(x); return (/^(8\d?|11|18)%$/.test(s) ? 'an ' : 'a ') + s; };
+  // "about a 30% chance", or plain words at the extremes
+  const chanceOf = (x) => (x < 0.005 ? 'almost no chance' : x > 0.995 ? 'a near-certain win' : `about ${aP(x)} chance`);
+  // "their Aircraft squad (59.2M, 30% of its troops left)"
+  const sqIn = (q, frac, whose, form) => `${whose} ${whose === 'your' ? sqName(q, form) : TN(q.t)} squad (${fmtM(q.p)}${frac < 0.95 ? `, ${pct(frac)} of its troops left` : ''})`;
+  // A squad in a sentence: "Tank", or "94.9M Tank" when two of the player's squads share a type.
+  const sqName = (q, form) => ((form || []).filter((x) => x.t === q.t).length > 1 ? `${fmtM(q.p)} ${TN(q.t)}` : TN(q.t));
+  const sameSq = (a, b) => (a.id != null && b.id != null ? String(a.id) === String(b.id) : a.t === b.t && Math.abs(a.p - b.p) < 0.05);
+  // What to change, in words, to get from the order played to a better one.
+  function orderFix(played, better) {
+    if (!sameSq(played[0], better[0])) return `led with your ${sqName(better[0], played)} squad`;
+    if (!sameSq(played[1], better[1])) return `kept ${sqName(better[0], played)} first and sent your ${sqName(better[1], played)} squad second`;
+    return null;
+  }
+  // One fight's encounters from this player's side, with the share of troops each squad had left going in.
+  function encountersOf(e) {
+    if (!Array.isArray(e.enc) || !e.enc.length || !e.side) return [];
+    const mine = {}, theirs = {}, fullM = {}, fullT = {}, out = [], a = e.side === 'a';
+    e.form.forEach((q) => { if (q.id != null) mine[String(q.id)] = q; });
+    e.oppForm.forEach((q) => { if (q.id != null) theirs[String(q.id)] = q; });
+    e.enc.forEach((x) => {
+      const mid = String(a ? x[0] : x[1]), tid = String(a ? x[1] : x[0]), mq = mine[mid], tq = theirs[tid];
+      if (!mq || !tq) return;
+      const mb = +(a ? x[3] : x[5]), tb = +(a ? x[5] : x[3]);
+      if (fullM[mid] == null) fullM[mid] = mb;
+      if (fullT[tid] == null) fullT[tid] = tb;
+      out.push({ mine: mq, theirs: tq, won: x[2] === e.side, mf: fullM[mid] > 0 ? mb / fullM[mid] : 1, tf: fullT[tid] > 0 ? tb / fullT[tid] : 1 });
+    });
+    return out;
+  }
+  // How much stronger your squad was going into an encounter: power x troops left x counter edge, yours over theirs.
+  const edgeOf = (x, bonus) => (x.mf * x.mine.p * (E.BEATS[x.mine.t] === x.theirs.t ? 1 + bonus : 1)) / Math.max(1e-9, x.tf * x.theirs.p * (E.BEATS[x.theirs.t] === x.mine.t ? 1 + bonus : 1));
+  const CLEAR_EDGE = 1.1; // "clearly the stronger side": 10% or more
   function insightsFor(pl) {
-    const st = settings(), P = fullIndex().players;
-    const opt = { bonus: +st.bonus, sigma: +st.sigma, attr: +st.attr || 1.5, n: 300 };
-    const colBest = (W, j) => { let b = 0; for (let i = 1; i < 6; i++) if (W[i][j] > W[b][j] + 1e-9) b = i; return b; };
+    const st = settings(), P = fullIndex().players, bonus = +st.bonus;
+    const opt = { bonus, sigma: +st.sigma, attr: +st.attr || 1.5, n: 300 };
     return pl.entries.map((e) => {
       const mine = E.canonical(e.form), theirs = E.canonical(e.oppForm);
       const W = E.winMatrix(mine.canon, theirs.canon, opt);
@@ -1871,8 +1914,9 @@ details[open] > summary { margin-bottom: 10px; }
       const op = P[e.oppKey], prev = op ? op.entries.filter((x) => x.round < e.round) : [];
       let shown = null;
       if (prev.length) {
-        const sc = E.canonical(prev[prev.length - 1].form), W3 = E.winMatrix(mine.canon, sc.canon, opt), k3 = colBest(W3, sc.perm);
-        shown = { vs: W3[mine.perm][sc.perm], best: W3[k3][sc.perm], order: E.orderSquads(mine.canon, k3), form: prev[prev.length - 1].form, repeated: E.matchPerm(e.oppForm, sc.canon) === sc.perm };
+        const pv = prev[prev.length - 1], sc = E.canonical(pv.form), W3 = E.winMatrix(mine.canon, sc.canon, opt), k3 = colBest(W3, sc.perm);
+        shown = { vs: W3[mine.perm][sc.perm], best: W3[k3][sc.perm], order: E.orderSquads(mine.canon, k3), form: pv.form, round: pv.round,
+          vsName: pv.oppKey === pl.key ? 'you' : pv.oppName, repeated: E.matchPerm(e.oppForm, sc.canon) === sc.perm };
       }
       const tags = [];
       if (!e.won && best >= 0.6 && best - played >= 0.25) tags.push('order');
@@ -1881,35 +1925,123 @@ details[open] > summary { margin-bottom: 10px; }
       if (!e.won && Math.max(best, ov ? ov.chance : 0) < 0.35) tags.push('outmatched');
       if (!e.won && played >= 0.6) tags.push('unlucky');
       if (e.won && played < 0.4) tags.push('lucky');
-      return { e, played, best, bestOrder: E.orderSquads(mine.canon, bk), ov, shown, tags };
+      // Lost on power: how much more power, spread over all three squads, would have made it an even fight.
+      let even = null;
+      if (tags.includes('outmatched')) {
+        const at = (s) => {
+          const c = E.canonical(e.form.map((q) => (q.id != null ? { t: q.t, p: q.p * s, id: q.id } : { t: q.t, p: q.p * s })));
+          const W4 = E.winMatrix(c.canon, theirs.canon, opt);
+          return W4[colBest(W4, theirs.perm)][theirs.perm];
+        };
+        if (at(2) >= 0.5) { let lo = 1, hi = 2; for (let i = 0; i < 7; i++) { const m = (lo + hi) / 2; if (at(m) >= 0.5) hi = m; else lo = m; } even = hi; } else even = Infinity;
+      }
+      // The encounter that hurt most: one of your squads losing while it was clearly the stronger side.
+      const enc = encountersOf(e);
+      let upset = null;
+      enc.forEach((x) => { const g = edgeOf(x, bonus); if (!x.won && g >= CLEAR_EDGE && (!upset || g > upset.edge)) upset = { x, edge: g }; });
+      return { e, played, best, bestOrder: E.orderSquads(mine.canon, bk), ov, shown, tags, enc, even, upset };
     });
   }
+  // Each of a player's squads (by team) across all their fights: encounters fought and won, and losses while clearly stronger.
+  function squadRecords(rows, bonus) {
+    const R = {};
+    rows.forEach((r) => r.enc.forEach((x) => {
+      if (x.mine.id == null) return;
+      const s = R[String(x.mine.id)] || (R[String(x.mine.id)] = { n: 0, w: 0, upsets: [] });
+      s.n++;
+      if (x.won) s.w++;
+      const g = edgeOf(x, bonus);
+      if (!x.won && g >= CLEAR_EDGE) s.upsets.push({ r, x, edge: g });
+    }));
+    return R;
+  }
   const TAG = { order: ['bad', 'Order'], overlord: ['bad', 'Overlord'], risky: ['warn', 'Risky pick'], outmatched: ['', 'Outmatched'], unlucky: ['', 'Unlucky'], lucky: ['ok', 'Lucky win'] };
+  const MAX_FIGHT_TIPS = 5;
   function insightTips(pl, rows) {
-    const tips = [], L = (t) => rows.filter((r) => r.tags.includes(t)), rl = (a) => a.map((r) => 'R' + r.e.round).join(', ');
-    const order = L('order'), ovl = L('overlord'), risky = L('risky'), out = L('outmatched'), unlucky = L('unlucky');
-    if (order.length) tips.push({ hot: true, h: `${plural(order.length, 'loss')} a different order would likely have won`, p: `${rl(order)}: against what they actually played, the order listed for that fight rates 60% or better. Before each round, Next fight shows the best answer to the formation they last showed.` });
-    if (ovl.length) tips.push({ hot: true, h: `${plural(ovl.length, 'loss')} where moving your Overlord would likely have won`, p: `${rl(ovl)}: with your Overlord on the team listed (and the order shown), the simulator rates the fight 60% or better.` });
-    if (risky.length) {
-      const rep = risky.filter((r) => r.shown.repeated).length;
-      tips.push({ hot: false, h: `${plural(risky.length, 'fight')} where your order was a poor answer to what they had shown`, p: `${rl(risky)}. They repeated that formation in ${rep} of these. Most players repeat their last order, so answering what they show is the safest habit.` });
+    const tips = [], bonus = +settings().bonus, lf = pl.entries[pl.entries.length - 1].form;
+    const who = (e) => `R${e.round} vs ${e.oppName}`, whoH = (e) => `<b>R${esc(e.round)} vs ${esc(e.oppName)}</b>`;
+    // 1. Fights where a different order or Overlord spot would likely have changed the result, costliest first.
+    const fights = [];
+    rows.forEach((r) => {
+      const e = r.e, sh = r.shown, t = r.tags;
+      const scout = !sh ? (e.round <= 1 ? 'It was round 1, so there was nothing to scout.' : 'None of their earlier fights is logged, so there was nothing to scout.')
+        : sh.repeated ? `They played the same order as in R${sh.round} (vs ${sh.vsName}), so you could have seen it coming.`
+        : `They changed their order from R${sh.round} (vs ${sh.vsName}), so it was hard to see coming.`;
+      const they = { k: 'They played', form: e.oppForm }, you = (ch) => ({ k: 'You played', form: e.form, ch });
+      if (t.includes('overlord')) {
+        const to = e.form.find((q) => q.id === r.ov.id), from = e.form.find((q) => q.id === e.ex.ov);
+        fights.push({ gain: r.ov.chance - r.played, hot: true, h: `${who(e)}: you should have moved your Overlord to your ${sqName(to, e.form)} squad`,
+          p: `Your setup had ${chanceOf(r.played)} against theirs. With the Overlord moved${from ? ` off your ${sqName(from, e.form)} squad` : ''} and the order below, it was about ${pct(r.ov.chance)}.${t.includes('order') ? ` Changing only your order would have given about ${pct(r.best)}.` : ''} ${scout}`,
+          rows: [they, you(r.played), { k: 'Better', form: r.ov.order, ch: r.ov.chance }] });
+      } else if (t.includes('order')) {
+        fights.push({ gain: r.best - r.played, hot: true, h: `${who(e)}: you should have ${orderFix(e.form, r.bestOrder) || 'changed your order'}`,
+          p: `Your order had ${chanceOf(r.played)} against theirs; the better order below had about ${pct(r.best)}. ${scout}${sh && !sh.repeated && t.includes('risky') ? ` Your order was a weak answer to their R${sh.round} order too (${pct(sh.vs)}).` : ''}`,
+          rows: [they, you(r.played), { k: 'Better', form: r.bestOrder, ch: r.best }] });
+      } else if (t.includes('risky')) {
+        const end = sh.repeated ? (e.won ? (sh.vs < 0.5 ? 'They played it again, so this win was lucky.' : 'They played it again; you won, but the better order was safer.') : 'They played it again; the better order was your best shot.')
+          : (e.won ? 'They switched, which happened to suit you.' : 'They switched, so the better order might not have saved this fight.');
+        fights.push({ gain: (sh.best - sh.vs) * (e.won ? 0.5 : 1), hot: !e.won, h: `${who(e)}: ${e.won ? 'you won, but ' : ''}you should have ${orderFix(e.form, sh.order) || 'changed your order'}`,
+          p: `In R${sh.round} (vs ${sh.vsName}) they played the order below, and your order had only ${chanceOf(sh.vs)} against it; the better order had about ${pct(sh.best)}. ${end}`,
+          rows: [{ k: `Their R${sh.round}`, form: sh.form }, you(sh.vs), { k: 'Better', form: sh.order, ch: sh.best }] });
+      }
+    });
+    fights.sort((x, y) => (y.hot - x.hot) || (y.gain - x.gain));
+    fights.slice(0, MAX_FIGHT_TIPS).forEach((f) => tips.push(f));
+    if (fights.length > MAX_FIGHT_TIPS) {
+      const rest = fights.slice(MAX_FIGHT_TIPS).map((f) => f.h.split(':')[0]);
+      tips.push({ hot: false, h: `${plural(rest.length, 'more fight')} like these`, p: `${rest.join(', ')}. Details are in Fight by fight.` });
     }
+    // 2. Overlord and mythic gear away from the main type.
     const h = habitsOf(pl);
     if (h && h.main && h.tbs.length > 1 && h.tbs[0][1] - h.tbs[1][1] >= 0.03) {
-      const ovType = h.ov ? h.types[h.ov] : null, gearType = h.m6Teams.length ? h.types[h.m6Teams[0]] : null, main = E.TYPE_NAME[h.main];
-      if (ovType && ovType !== h.main) tips.push({ hot: true, h: `Your Overlord sits on your ${E.TYPE_NAME[ovType] || 'mixed'} squad, but your main type is ${main}`, p: `Your highest type bonus (which tracks mastery) is ${main}. Most strong players keep the Overlord on that squad.` });
-      if (gearType && gearType !== h.main) tips.push({ hot: true, h: `Most of your mythic gear is on your ${E.TYPE_NAME[gearType] || 'mixed'} squad, not your ${main} squad`, p: `Your best gear usually does the most on the squad with your highest mastery.` });
+      const main = TN(h.main), lfx = h.last.form, tb = pct(h.tbs[0][1], 1);
+      const ovSq = h.ov ? lfx.find((q) => q.id === h.ov) : null, gTeam = h.m6Teams.length ? h.m6Teams[0] : null, gSq = gTeam ? lfx.find((q) => q.id === gTeam) : null;
+      if (ovSq && ovSq.t !== h.main) tips.push({ hot: true, h: `Move your Overlord to your ${main} squad`, p: `${main} is your highest type bonus (${tb}), a sign it's where you have the most mastery, and strong players keep the Overlord there. It's on your ${sqName(ovSq, lfx)} squad now.` });
+      if (gSq && gSq.t !== h.main) tips.push({ hot: true, h: `Move your mythic gear to your ${main} squad`, p: `${h.m6[gTeam]} of your ${h.m6Total} mythic (M6) pieces are on your ${sqName(gSq, lfx)} squad. Gear does the most on the squad with your most mastery, which is ${main} (${tb} type bonus).` });
     }
-    if (out.length) tips.push({ hot: false, h: `${plural(out.length, 'loss')} no order or Overlord spot would have won`, p: `${rl(out)}: their squads were simply stronger. Power and gear, not order, decide these.` });
-    const lf = pl.entries[pl.entries.length - 1].form, ps = lf.map((q) => q.p), mx = Math.max.apply(null, ps), mn = Math.min.apply(null, ps);
-    if (mn < 0.7 * mx) tips.push({ hot: false, h: `Your weakest team is ${pct(1 - mn / mx)} behind your strongest`, p: 'Every squad fights at least once in a duel, so a weak team costs close fights.' });
-    const mixed = lf.filter((q) => q.t === 'X');
-    if (mixed.length) tips.push({ hot: false, h: `${plural(mixed.length, 'squad')} without 3 heroes of one type`, p: 'Mixed squads get no counter edge in the simulator, and guides say 5 heroes of one type earn the biggest type bonus in the game.' });
-    if (unlucky.length) tips.push(unlucky.length >= 3
-      ? { hot: true, h: `${plural(unlucky.length, 'loss')} the simulator expected you to win`, p: `${rl(unlucky)}: your order wasn't the problem. When this keeps happening, something hero power doesn't show is likely holding your squads back, such as troop tier, drone, chips or skills.` }
-      : { hot: false, h: `${plural(unlucky.length, 'loss')} the simulator expected you to win`, p: `${rl(unlucky)}: your order wasn't the problem. Things hero power doesn't show (troop tier, drone, chips, skills) can decide a fight.` });
+    // 3. Lost on power.
+    const out = rows.filter((r) => r.tags.includes('outmatched'));
+    if (out.length) {
+      const line = (r) => {
+        const e = r.e, mp = sumP(e.form), tp = sumP(e.oppForm), minT = Math.min(...e.oppForm.map((q) => q.p)), maxM = Math.max(...e.form.map((q) => q.p));
+        let s = `Their squads had ${fmtM(tp)} in total, yours ${fmtM(mp)}. Your best order had ${chanceOf(Math.max(r.best, r.ov ? r.ov.chance : 0))}`;
+        s += r.even === Infinity ? '; even double your power would not have been enough.' : r.even ? `; about ${fmtM(mp * (r.even - 1))} more power would have made it an even fight.` : '.';
+        if (minT > maxM) s += ` Even their weakest squad (${fmtM(minT)}) was stronger than your strongest (${fmtM(maxM)}).`;
+        return s;
+      };
+      tips.push(out.length === 1
+        ? { hot: false, h: `${who(out[0].e)}: lost on power, no order would have won`, p: `${line(out[0])} This needs more squad power, not a new order.` }
+        : { hot: false, h: `${plural(out.length, 'loss')} on power: no order would have won these`, list: out.map((r) => `${whoH(r.e)}: ${esc(line(r))}`), p2: 'These need more squad power, not a new order.' });
+    }
+    // 4. Squads: the weakest one, and any that keep losing encounters they should win.
+    const recs = squadRecords(rows, bonus), rec = (q) => (q.id != null ? recs[String(q.id)] : null);
+    const ps = lf.map((q) => q.p), mx = Math.max(...ps), mn = Math.min(...ps);
+    if (mn < 0.7 * mx) {
+      const weak = lf[ps.indexOf(mn)], strong = lf[ps.indexOf(mx)], rw = rec(weak), rs = rec(strong);
+      tips.push({ hot: false, h: `Build up your ${sqName(weak, lf)} squad (${fmtM(weak.p)})`,
+        p: `It's ${pct(1 - mn / mx)} behind your ${sqName(strong, lf)} squad (${fmtM(strong.p)}).${rw && rs && rw.n && rs.n && rw.w / rw.n < rs.w / rs.n ? ` It won ${rw.w} of its ${plural(rw.n, 'encounter')}; your ${sqName(strong, lf)} squad won ${rs.w} of ${rs.n}.` : ''} When you lose, all three squads have fought, so a weak squad costs close fights.` });
+    }
+    lf.forEach((q) => {
+      const r = rec(q);
+      if (!r || r.upsets.length < 2) return;
+      const ex = r.upsets.slice().sort((a, b) => b.edge - a.edge).slice(0, 3).map((u) => `${who(u.r.e)} (to their ${TN(u.x.theirs.t)} ${fmtM(u.x.theirs.p)}${u.x.tf < 0.95 ? ` with ${pct(u.x.tf)} of its troops left` : ''})`);
+      tips.push({ hot: r.upsets.length >= 3, h: `Check your ${sqName(q, lf)} squad (${fmtM(q.p)}): it loses encounters it should win`,
+        p: `It lost ${plural(r.upsets.length, 'encounter')} where it was clearly the stronger side${r.upsets.length > 3 ? ', including' : ':'} ${ex.join(', ')}. Hero power doesn't show troop tier, drone, chips or skills, so one of those is likely behind on this squad.` });
+    });
+    // 5. Losses the simulator expected you to win.
+    const unl = rows.filter((r) => r.tags.includes('unlucky') && !r.tags.includes('order') && !r.tags.includes('overlord'));
+    const why = (r) => (r.upset ? ` ${sqIn(r.upset.x.mine, r.upset.x.mf, 'your', r.e.form).replace(/^y/, 'Y')} lost to ${sqIn(r.upset.x.theirs, r.upset.x.tf, 'their')} while it was clearly the stronger side.` : '');
+    if (unl.length === 1) tips.push({ hot: false, h: `${who(unl[0].e)}: you lost a fight you should have won`, p: `The simulator gave you ${chanceOf(unl[0].played)}, so your order wasn't the problem.${why(unl[0])} Hero power doesn't show troop tier, drone, chips or skills.` });
+    else if (unl.length) tips.push({ hot: unl.length >= 3, h: `${plural(unl.length, 'loss')} you should have won`, list: unl.map((r) => `${whoH(r.e)}: ${esc(`the simulator gave you ${chanceOf(r.played)}.${why(r)}`)}`), p2: "Your order wasn't the problem in these. Hero power doesn't show troop tier, drone, chips or skills." });
+    // 6. Mixed squads.
+    lf.filter((q) => q.t === 'X').forEach((q) => tips.push({ hot: false, h: `Make your ${fmtM(q.p)} mixed squad one type`, p: 'Without 3 heroes of one type it gets no counter edge in the simulator, and guides say 5 heroes of one type earn the biggest type bonus in the game.' }));
     if (!tips.length) tips.push({ hot: false, h: 'No clear mistakes found', p: rows.some((r) => !r.e.won) ? 'Your losses were close or against stronger squads.' : 'Every logged fight was a win.' });
     return tips;
+  }
+  function tipHTML(t) {
+    const rows = t.rows ? `<div class="tip-rows">${t.rows.map((x) => `<div class="tip-row${x.k === 'Better' ? ' better' : ''}"><span class="k">${esc(x.k)}${x.ch != null ? ` <b>${pct(x.ch)}</b>` : ''}</span>${orderHTML(x.form)}</div>`).join('')}</div>` : '';
+    const list = t.list ? `<ul class="tip-list">${t.list.map((x) => `<li>${x}</li>`).join('')}</ul>` : '';
+    return `<div class="tip${t.hot ? ' hot' : ''}"><h3>${esc(t.h)}</h3>${t.p ? `<p>${esc(t.p)}</p>` : ''}${list}${rows}${t.p2 ? `<p class="meta">${esc(t.p2)}</p>` : ''}</div>`;
   }
   function viewInsights() {
     const P = fullIndex().players, mates = allianceMates();
@@ -1933,7 +2065,7 @@ details[open] > summary { margin-bottom: 10px; }
       facts.push(stat('Mythic gear (M6)', h.m6Total ? h.m6Teams.map((id) => `${h.m6[id]} on ${esc(teamLabel(h.last.form, id))}`).join(', ') : 'none'));
     }
     const head = `<section class="card"><div class="card-h"><h2>Insights</h2><span class="aside">${plural(rows.length, 'fight')}</span></div>${pick}<div>${facts.join('')}</div></section>`;
-    const tipCard = `<section class="card"><div class="card-h"><h2>What to work on</h2></div><div class="stack">${tips.map((t) => `<div class="tip${t.hot ? ' hot' : ''}"><h3>${esc(t.h)}</h3><p>${esc(t.p)}</p></div>`).join('')}</div>
+    const tipCard = `<section class="card"><div class="card-h"><h2>What to work on</h2></div><div class="stack">${tips.map(tipHTML).join('')}</div>
       <p class="foot">Chances are the tracker's estimates from each fight's real squad powers (its simulator calls about 94% of fights right).</p></section>`;
     const fights = rows.slice().reverse().map((r) => {
       const e = r.e, tags = r.tags.map((t) => `<span class="tag ${TAG[t][0]}">${TAG[t][1]}</span>`).join(' ');
