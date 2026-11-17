@@ -291,7 +291,7 @@ details[open] > summary { margin-bottom: 10px; }
     counter: { label: 'Counters what they see', blurb: "Picks the order that beats their opponent's last formation." },
     wsls: { label: 'Keeps a win, changes a loss', blurb: 'Same order after a win; something different after a loss.' },
     double: { label: 'Second-guesser', blurb: 'Expects to be countered, so counters the counter.' },
-    dodge: { label: 'Dodges counters with strong squad', blurb: "Keeps their strong squad (Overlord and most mythic gear) away from the counter in their opponent's last order, ideally against a squad it beats." },
+    dodge: { label: 'Dodges counters with strong squad', blurb: "Keeps their strong squad (Overlord and best gear) away from the counter in their opponent's last order, ideally against a squad it beats." },
     random: { label: 'Unpredictable', blurb: 'No pattern the model can find.' }
   };
   var REMATCH_INFO = { label: 'Remembers your last meeting', blurb: 'In a rematch, replays the order that beat you, or counters the order that beat them.' };
@@ -366,12 +366,15 @@ details[open] > summary { margin-bottom: 10px; }
     var o = { name: name, s: squads };
     if (x.al != null && String(x.al).trim()) o.al = String(x.al).trim();
     if (x.sv != null && isFinite(+x.sv)) o.sv = +x.sv;
-    // From battle reports: which team carried the Overlord (ov) and roughly how much power it adds (op, millions),
-    // mythic (m6) and UR (ur) gear pieces per squad in slot order, and the type bonus per troop type (tb, a stand-in for mastery).
+    // From battle reports: which team carried the Overlord (ov) and how much power it adds (op, millions; exact:
+    // its base value plus the power of the troops it brings), mythic (m6, 5-star) and UR (ur, 0-4 star) gear pieces per squad
+    // in slot order, gear power per squad (gp, millions; counts every piece's level and stars), and the type bonus per
+    // troop type (tb, a stand-in for mastery).
     if (x.ov != null && String(x.ov) !== '') o.ov = String(x.ov);
     if (x.op != null && isFinite(+x.op) && +x.op > 0) o.op = +x.op;
     if (Array.isArray(x.m6) && x.m6.length === squads.length) o.m6 = x.m6.map(function (v) { return +v || 0; });
     if (Array.isArray(x.ur) && x.ur.length === squads.length) o.ur = x.ur.map(function (v) { return +v || 0; });
+    if (Array.isArray(x.gp) && x.gp.length === squads.length) o.gp = x.gp.map(function (v) { return +v || 0; });
     if (x.tb && typeof x.tb === 'object') {
       var tb = {};
       ['T', 'A', 'M'].forEach(function (t) { if (x.tb[t] != null && isFinite(+x.tb[t])) tb[t] = +x.tb[t]; });
@@ -431,7 +434,7 @@ details[open] > summary { margin-bottom: 10px; }
   // Overlord, gear and type-bonus details of one side, when the battle report had them.
   function extrasOf(side) {
     if (!side || (side.ov == null && !side.m6 && !side.tb)) return null;
-    return { ov: side.ov || null, op: side.op || 0, m6: side.m6 || null, ur: side.ur || null, tb: side.tb || null };
+    return { ov: side.ov || null, op: side.op || 0, m6: side.m6 || null, ur: side.ur || null, gp: side.gp || null, tb: side.tb || null };
   }
   // The Overlord adds its power to whichever squad carries it, so moving it shifts that much power between squads.
   function moveOverlord(form, ex, toId) {
@@ -605,7 +608,7 @@ details[open] > summary { margin-bottom: 10px; }
     d.dodge = ctx.strong != null && ctx.seenCanon && ctx.oppHabit ? dodgeDist(ctx.canon, ctx.strong, ctx.seenCanon, ctx.oppHabit, ctx.prevPerms) : U;
     return d;
   }
-  // Strong squad (Overlord + most mythic gear): kept away from the slot where the opponent's expected order has its counter,
+  // Strong squad (Overlord + best gear): kept away from the slot where the opponent's expected order has its counter,
   // and toward a slot facing a squad it beats. The first three encounters always pair slot 1 v 1, 2 v 2, 3 v 3.
   // The other two squads usually keep their order from last time. Tested on all groups' reports: better calibrated calls.
   function dodgeDist(canon, s, seenCanon, seenHabit, prevPerms) {
@@ -628,12 +631,19 @@ details[open] > summary { margin-bottom: 10px; }
     }
     return normalizeArr(p);
   }
-  // Which canonical squad is the strong one: the team with the Overlord and the most mythic gear, else the highest power.
+  // Does squad i (slot order) have the player's best gear? By gear power when the report gives it (within 2% of the
+  // best squad counts, since near-equal sets are common at the top); otherwise by the most mythic pieces.
+  function bestGeared(ex, i) {
+    if (!ex) return false;
+    if (ex.gp) { var mg = Math.max.apply(null, ex.gp); return mg > 0 && ex.gp[i] >= 0.98 * mg; }
+    return !!ex.m6 && ex.m6[i] > 0 && ex.m6[i] >= Math.max.apply(null, ex.m6);
+  }
+  // Which canonical squad is the strong one: the team with the Overlord and the best gear, else the highest power.
   function strongOf(canon, ex, form) {
-    if (ex && ex.ov && ex.m6 && form) {
+    if (ex && ex.ov && (ex.gp || ex.m6) && form) {
       var i = -1, k;
       for (k = 0; k < form.length; k++) if (form[k].id === ex.ov) i = k;
-      if (i >= 0 && ex.m6[i] > 0 && ex.m6[i] >= Math.max.apply(null, ex.m6)) for (k = 0; k < 3; k++) if (canon[k].id === ex.ov) return k;
+      if (i >= 0 && bestGeared(ex, i)) for (k = 0; k < 3; k++) if (canon[k].id === ex.ov) return k;
     }
     return strongestIndex(canon)[0];
   }
@@ -1018,7 +1028,7 @@ details[open] > summary { margin-bottom: 10px; }
     DEFAULT_W: DEFAULT_W, DEFAULTS: DEFAULTS,
     normType: normType, normPower: normPower, normSquads: normSquads, normBattle: normBattle, battleKey: battleKey, keyOf: keyOf,
     canonical: canonical, matchPerm: matchPerm, orderSquads: orderSquads, strongestIndex: strongestIndex,
-    extrasOf: extrasOf, moveOverlord: moveOverlord, mainType: mainType,
+    extrasOf: extrasOf, moveOverlord: moveOverlord, mainType: mainType, bestGeared: bestGeared,
     winMatrix: winMatrix, flipMatrix: flipMatrix, winProb: winProb, solveZeroSum: solveZeroSum,
     bestResponse: bestResponse, minResponse: minResponse, habitDist: habitDist, expertDists: expertDists, mixDists: mixDists,
     fitWeights: fitWeights, buildIndex: buildIndex, buildModel: buildModel, walkForward: walkForward, habitStats: habitStats,
@@ -1462,27 +1472,30 @@ details[open] > summary { margin-bottom: 10px; }
     let ovMoves = 0;
     for (let i = 1; i < ovs.length; i++) if (ovs[i] !== ovs[i - 1]) ovMoves++;
     const byTeam = (e) => { const o = {}; if (e.ex.m6) e.form.forEach((q, k) => { o[q.id] = e.ex.m6[k]; }); return o; };
-    // A gear move: one squad loses mythic pieces while another gains some, between two fights in a row (upgrades only add).
+    const gpOf = (e) => { const o = {}; if (e.ex.gp) e.form.forEach((q, k) => { o[q.id] = e.ex.gp[k]; }); return o; };
+    // A gear move: between two fights in a row, one squad's gear gets weaker while another's gets stronger (upgrades only add).
+    // With gear power known: a drop and a rise of at least 0.05M. Without it: mythic pieces leave one squad and join another.
     let gearMoves = 0;
     for (let i = 1; i < es.length; i++) {
-      const a = byTeam(es[i - 1]), b = byTeam(es[i]);
+      const useGp = !!(es[i - 1].ex.gp && es[i].ex.gp), a = useGp ? gpOf(es[i - 1]) : byTeam(es[i - 1]), b = useGp ? gpOf(es[i]) : byTeam(es[i]), min = useGp ? 0.045 : 1;
       let down = false, up = false;
-      Object.keys(b).forEach((id) => { if (id in a) { if (b[id] < a[id]) down = true; if (b[id] > a[id]) up = true; } });
+      Object.keys(b).forEach((id) => { if (id in a) { if (a[id] - b[id] >= min) down = true; if (b[id] - a[id] >= min) up = true; } });
       if (down && up) gearMoves++;
     }
     const m6 = byTeam(last), m6Teams = Object.keys(m6).filter((id) => m6[id] > 0).sort((x, y) => m6[y] - m6[x]);
     const m6Total = m6Teams.reduce((n, id) => n + m6[id], 0);
     const ur = {};
     if (ex.ur) last.form.forEach((q, k) => { ur[q.id] = ex.ur[k]; });
-    return { n: es.length, last, ex, types, main: E.mainType(ex.tb), tbs, ov: ex.ov, op: ex.op, ovN: ovs.length, ovMoves, m6, m6Teams, m6Total, ur, gearMoves,
+    const gp = gpOf(last), gpTeams = Object.keys(gp).filter((id) => gp[id] > 0).sort((x, y) => gp[y] - gp[x]);
+    return { n: es.length, last, ex, types, main: E.mainType(ex.tb), tbs, ov: ex.ov, op: ex.op, ovN: ovs.length, ovMoves, m6, m6Teams, m6Total, ur, gp, gpTeams, gearMoves,
       gearLocked: es.length >= 3 && m6Total > 0 && gearMoves === 0 && m6Teams.length === 1 };
   }
-  // The strong squad in one fight: the team carrying the Overlord and the most mythic gear.
+  // The strong squad in one fight: the team carrying the Overlord, when it also has the player's best gear.
   function strongSlot(e) {
     const x = e.ex;
-    if (!x || !x.ov || !x.m6) return null;
+    if (!x || !x.ov || !(x.gp || x.m6)) return null;
     const i = e.form.findIndex((q) => q.id === x.ov);
-    if (i < 0 || !(x.m6[i] > 0) || x.m6[i] < Math.max(...x.m6)) return null;
+    if (i < 0 || !E.bestGeared(x, i)) return null;
     return { slot: i, q: e.form[i] };
   }
   const COUNTER_OF = { M: 'T', A: 'M', T: 'A' }; // the type that beats each type
@@ -1896,12 +1909,12 @@ details[open] > summary { margin-bottom: 10px; }
       ? `Keep it on ${esc(teamLabel(mf, now.id))}. Moving it doesn't improve this matchup.`
       : `Moving it to ${esc(teamLabel(mf, best.id))} raises your chance from ${pct(now.ev)} to ${pct(best.ev)}, with the order shown for that row.`;
     return `<section class="card c-ov" aria-labelledby="h-ov">
-      <div class="card-h"><h2 id="h-ov">Your Overlord</h2><span class="aside">adds about ${fmtP(ex.op)}M to its squad</span></div>
+      <div class="card-h"><h2 id="h-ov">Your Overlord</h2><span class="aside">adds ${fmtP(ex.op)}M to its squad</span></div>
       <p class="callout">${head}</p>
       <div class="scroll"><table><thead><tr><th>Overlord on</th><th>Best order</th><th>Chance</th></tr></thead><tbody>
         ${spots.map((x) => `<tr${x === best && best.ev - now.ev >= 0.03 ? ' class="best"' : ''}><td>${esc(teamLabel(mf, x.id))}${x === now ? ' <span class="meta">now</span>' : ''}</td><td>${permHTML(x.pr.myCanon, x.pr.best)}</td><td>${pct(x.ev)}</td></tr>`).join('')}
       </tbody></table></div>
-      <p class="foot">${main ? `Your main type is ${E.TYPE_NAME[main]} (highest type bonus, our stand-in for mastery). ` : ''}Most players keep the Overlord on their main squad, next to their best gear. Moving it shifts only the Overlord's own power, not your gear.</p>
+      <p class="foot">${main ? `Your main type is ${E.TYPE_NAME[main]} (highest type bonus, our stand-in for mastery). ` : ''}Most players keep the Overlord on their main squad, next to their best gear. Moving it shifts the Overlord's own power and the few hundred troops it brings, not your gear.</p>
     </section>`;
   }
   // Key facts about the chosen opponent, highlighted under their name in the Matchup card.
@@ -1926,10 +1939,10 @@ details[open] > summary { margin-bottom: 10px; }
         facts.push({ t: bal ? 'Balanced main type' : `${E.TYPE_NAME[h.tbs[0][0]]} main`, hot: !bal });
       }
       if (h.ov) facts.push(h.ovMoves ? { t: `Moves their Overlord (${plural(h.ovMoves, 'time')})`, hot: true } : { t: `Overlord ${h.ovN >= 3 ? 'locked on' : 'on'} ${tt(h.ov)}`, hot: h.ovN >= 3 });
-      if (h.m6Total) facts.push(h.gearMoves ? { t: `Moves mythic gear (${plural(h.gearMoves, 'time')})`, hot: true }
-        : h.gearLocked ? { t: `Mythic gear locked on ${tt(h.m6Teams[0])}`, hot: true }
+      if (h.gearMoves) facts.push({ t: `Moves gear between squads (${plural(h.gearMoves, 'time')})`, hot: true });
+      else if (h.m6Total) facts.push(h.gearLocked ? { t: `Mythic gear locked on ${tt(h.m6Teams[0])}`, hot: true }
         : { t: `Mythic gear on ${h.m6Teams.map(tt).join(' + ')}${h.n >= 3 ? ', never moved' : ''}`, hot: h.n >= 3 });
-      else facts.push({ t: 'No mythic gear', hot: false });
+      else facts.push({ t: h.gpTeams.length ? `No mythic gear · best gear on ${tt(h.gpTeams[0])}` : 'No mythic gear', hot: false });
     }
     const sg = strongHabit(pl);
     if (sg && sg.dodges) facts.push({ t: `Strong squad (${TS[sg.q.t]}) dodges counters`, hot: true });
@@ -1952,15 +1965,17 @@ details[open] > summary { margin-bottom: 10px; }
         ? `Balanced <span class="meta">${h.tbs.map(([t, v]) => TS[t] + ' ' + pct(v)).join(' · ')}</span>`
         : `${E.TYPE_NAME[t1]} <span class="meta">${pct(v1)}${second ? ' vs ' + pct(second[1]) : ''}</span>`));
     }
-    rows.push(stat(`Overlord${h.op ? ` <span class="meta">about ${fmtP(h.op)}M</span>` : ''}`, h.ov
+    rows.push(stat(`Overlord${h.op ? ` <span class="meta">${fmtP(h.op)}M</span>` : ''}`, h.ov
       ? `${tl(h.ov)}${h.main && h.types[h.ov] === h.main ? ', their main' : ''} · ${h.ovMoves ? 'moved ' + plural(h.ovMoves, 'time') : h.ovN > 1 ? 'never moved' : 'one fight seen'}`
       : 'none seen'));
-    rows.push(stat('Mythic gear (M6)', h.m6Total
-      ? `${h.m6Teams.map((id) => `${h.m6[id]} on ${tl(id)}`).join(', ')} · ${h.gearMoves ? 'moved ' + plural(h.gearMoves, 'time') : h.n > 1 ? 'never moved' : 'one fight seen'}`
+    if (h.gpTeams.length) rows.push(stat('Gear power <span class="meta">(levels and stars counted)</span>',
+      `${h.last.form.map((q) => `${TS[q.t]} ${fmtP(h.gp[q.id] || 0)}M`).join(' · ')} · ${h.gearMoves ? 'gear moved ' + plural(h.gearMoves, 'time') : h.n > 1 ? 'never moved' : 'one fight seen'}`));
+    rows.push(stat('Mythic gear <span class="meta">(5★ pieces)</span>', h.m6Total
+      ? `${h.m6Teams.map((id) => `${h.m6[id]} on ${tl(id)}`).join(', ')}${h.gpTeams.length ? '' : ` · ${h.gearMoves ? 'moved ' + plural(h.gearMoves, 'time') : h.n > 1 ? 'never moved' : 'one fight seen'}`}`
       : 'none'));
-    if (Object.keys(h.ur).length) rows.push(stat('UR gear (M5)', h.last.form.map((q) => `${h.ur[q.id] || 0} on ${TS[q.t]}`).join(' · ')));
+    if (Object.keys(h.ur).length) rows.push(stat('UR gear <span class="meta">(0–4★ pieces)</span>', h.last.form.map((q) => `${h.ur[q.id] || 0} on ${TS[q.t]}`).join(' · ')));
     const sg = strongHabit(pl);
-    if (sg) rows.push(stat('Strong squad <span class="meta">(Overlord + most mythic)</span>', `${TS[sg.q.t]} · ${sg.pairs ? (sg.moves ? `moved ${sg.moves} of ${sg.pairs} times` : `always ${ORD[sg.slot]}`) : 'one fight seen'}${sg.n ? ` · opposite its counter ${sg.faced} of ${sg.n} times <span class="meta">(about ${Math.round(sg.exp)} at random)</span>` : ''}`));
+    if (sg) rows.push(stat('Strong squad <span class="meta">(Overlord + best gear)</span>', `${TS[sg.q.t]} · ${sg.pairs ? (sg.moves ? `moved ${sg.moves} of ${sg.pairs} times` : `always ${ORD[sg.slot]}`) : 'one fight seen'}${sg.n ? ` · opposite its counter ${sg.faced} of ${sg.n} times <span class="meta">(about ${Math.round(sg.exp)} at random)</span>` : ''}`));
     let alt = '';
     if (h.ov && h.op > 0 && !S.oppEdited && mf) {
       const m = model(), mc = E.canonical(mf).canon, shownK = S.shownPerm != null ? S.shownPerm : defaultShown(mf).k;
@@ -2301,13 +2316,18 @@ details[open] > summary { margin-bottom: 10px; }
       const rest = fights.slice(MAX_FIGHT_TIPS).map((f) => f.h.split(':')[0]);
       tips.push({ hot: false, h: `${plural(rest.length, 'more fight')} like these`, p: `${rest.join(', ')}. Details are in Fight by fight.` });
     }
-    // 2. Overlord and mythic gear away from the main type.
+    // 2. Overlord and best gear away from the main type.
     const h = habitsOf(pl);
     if (h && h.main && h.tbs.length > 1 && h.tbs[0][1] - h.tbs[1][1] >= 0.03) {
       const main = TN(h.main), lfx = h.last.form, tb = pct(h.tbs[0][1], 1);
-      const ovSq = h.ov ? lfx.find((q) => q.id === h.ov) : null, gTeam = h.m6Teams.length ? h.m6Teams[0] : null, gSq = gTeam ? lfx.find((q) => q.id === gTeam) : null;
+      const ovSq = h.ov ? lfx.find((q) => q.id === h.ov) : null, mainSq = lfx.find((q) => q.t === h.main);
+      // Best-geared squad: by gear power when the report gives it (it counts levels and stars), else by mythic pieces.
+      const byPower = h.gpTeams.length > 0, gTeam = byPower ? h.gpTeams[0] : (h.m6Teams.length ? h.m6Teams[0] : null), gSq = gTeam ? lfx.find((q) => q.id === gTeam) : null;
       if (ovSq && ovSq.t !== h.main) tips.push({ hot: true, h: `Move your Overlord to your ${main} squad`, p: `${main} is your highest type bonus (${tb}), a sign it's where you have the most mastery, and strong players keep the Overlord there. It's on your ${sqName(ovSq, lfx)} squad now.` });
-      if (gSq && gSq.t !== h.main) tips.push({ hot: true, h: `Move your mythic gear to your ${main} squad`, p: `${h.m6[gTeam]} of your ${h.m6Total} mythic (M6) pieces are on your ${sqName(gSq, lfx)} squad. Gear does the most on the squad with your most mastery, which is ${main} (${tb} type bonus).` });
+      if (gSq && gSq.t !== h.main && byPower) {
+        // Only when the gap is clear: at least 10% more gear power than the main-type squad.
+        if (mainSq && h.gp[gTeam] >= 1.1 * (h.gp[mainSq.id] || 0)) tips.push({ hot: true, h: `Move your best gear to your ${main} squad`, p: `Your strongest gear is on your ${sqName(gSq, lfx)} squad: ${fmtM(h.gp[gTeam])} of gear power, against ${fmtM(h.gp[mainSq.id] || 0)} on your ${main} squad. Gear does the most on the squad with your most mastery, which is ${main} (${tb} type bonus).` });
+      } else if (gSq && gSq.t !== h.main) tips.push({ hot: true, h: `Move your mythic gear to your ${main} squad`, p: `${h.m6[gTeam]} of your ${h.m6Total} mythic pieces are on your ${sqName(gSq, lfx)} squad. Gear does the most on the squad with your most mastery, which is ${main} (${tb} type bonus).` });
     }
     // 3. Lost on power.
     const out = rows.filter((r) => r.tags.includes('outmatched'));
@@ -2368,7 +2388,8 @@ details[open] > summary { margin-bottom: 10px; }
     if (h) {
       if (h.tbs.length) facts.push(stat('Main type <span class="meta">(highest type bonus)</span>', h.tbs.length > 1 && h.tbs[0][1] - h.tbs[1][1] < 0.03 ? 'Balanced' : E.TYPE_NAME[h.tbs[0][0]]));
       if (h.ov) facts.push(stat('Overlord', `${esc(teamLabel(h.last.form, h.ov))}${h.ovMoves ? ' · moved ' + plural(h.ovMoves, 'time') : ''}`));
-      facts.push(stat('Mythic gear (M6)', h.m6Total ? h.m6Teams.map((id) => `${h.m6[id]} on ${esc(teamLabel(h.last.form, id))}`).join(', ') : 'none'));
+      if (h.gpTeams.length) facts.push(stat('Gear power', h.last.form.map((q) => `${TS[q.t]} ${fmtP(h.gp[q.id] || 0)}M`).join(' · ')));
+      facts.push(stat('Mythic gear <span class="meta">(5★ pieces)</span>', h.m6Total ? h.m6Teams.map((id) => `${h.m6[id]} on ${esc(teamLabel(h.last.form, id))}`).join(', ') : 'none'));
     }
     const head = `<section class="card"><div class="card-h"><h2>Insights</h2><span class="aside">${plural(rows.length, 'fight')}</span></div>${pick}<div>${facts.join('')}</div></section>`;
     const tipCard = `<section class="card"><div class="card-h"><h2>What to work on</h2></div><div class="stack">${tips.map(tipHTML).join('')}</div>
@@ -2530,7 +2551,7 @@ details[open] > summary { margin-bottom: 10px; }
     const how = `<section class="card" aria-labelledby="h-how"><div class="card-h"><h2 id="h-how">How the tracker works</h2></div><div class="prose">
       <p>Each encounter, both sides send the next squad in line. The winner goes to the back of its line with the troops it has left; the loser is out. The fight ends when one side has no squads left, so it takes 3 to 5 encounters. This rule matched every one of 391 encounters in real battle reports.</p>
       <p>The simulator plays all 36 pairings of your order against theirs, ${(+st.sims || 1500).toLocaleString()} times each, letting every squad's real strength drift about ${pct(+st.sigma, 1)} from its listed power. A squad whose type beats its opponent's (Tank beats Missile, Missile beats Aircraft, Aircraft beats Tank) fights as if it had ${pct(+st.bonus, 1)} more power. Both numbers were fitted to real encounters: power decides almost everything, and the counter edge is small.</p>
-      <p>To predict an opponent, the tracker replays their logged fights against seven habits: repeating their last order, leading with their strongest squad, countering the formation they could see, keeping a winning order and changing a losing one, second-guessing, keeping their strong squad (Overlord and most mythic gear) away from its counter in the formation they could see, and picking at random. It learns how much of each habit that player shows. Players with only a few fights lean on how everyone in your log behaves.</p>
+      <p>To predict an opponent, the tracker replays their logged fights against seven habits: repeating their last order, leading with their strongest squad, countering the formation they could see, keeping a winning order and changing a losing one, second-guessing, keeping their strong squad (Overlord and best gear) away from its counter in the formation they could see, and picking at random. It learns how much of each habit that player shows. Players with only a few fights lean on how everyone in your log behaves.</p>
       <p>When you meet someone again, they know exactly what you played against them last time. The tracker adds an eighth habit for rematches: replay the order that won, or counter the order that beat them. It learns how often each player does that.</p>
       <p>The call is the order that wins most often against that prediction. The safe mix is the game-theory answer: odds that guarantee a minimum win chance whatever they play, for when you'd rather not be read.</p>
       <p>Anyone with Contributor access can log battle reports here, and the owner can ask Claude to import whole groups straight from the duel's battle reports.</p></div></section>`;
