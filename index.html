@@ -1107,8 +1107,11 @@ details[open] > summary { margin-bottom: 10px; }
       var r = fightPts(SA, SB, trA, trB, tA, tB, bonus, k);
       if (r[0] >= 0.5) { w += r[0]; a1 += r[1]; b1 += r[2]; } else { nl++; a0 += r[1]; b0 += r[2]; }
     }
-    var nw = n - nl;
-    return { p: w / n, a1: nw ? a1 / nw : 0, b1: nw ? b1 / nw : 0, a0: nl ? a0 / nl : 0, b0: nl ? b0 / nl : 0 };
+    var nw = n - nl, totA = trA[0] + trA[1] + trA[2], totB = trB[0] + trB[1] + trB[2];
+    // A result that never came up in the sample can still happen in the race (form swings): score it as a narrow fight.
+    return { p: w / n,
+      a1: nw ? a1 / nw : WIN_BONUS + PER_TROOP * (totB + 0.25 * totA), b1: nw ? b1 / nw : PER_TROOP * 0.75 * totA,
+      a0: nl ? a0 / nl : PER_TROOP * 0.75 * totB, b0: nl ? b0 / nl : WIN_BONUS + PER_TROOP * (totA + 0.25 * totB) };
   }
 
   // A full match between two players who usually repeat their last order (78% of choices in the reports do):
@@ -1935,7 +1938,7 @@ details[open] > summary { margin-bottom: 10px; }
     if (met.length) { const last = met[met.length - 1]; facts.push({ t: `Rematch: you ${last.won ? 'lost' : 'won'} round ${last.round}`, hot: true }); }
     const orx = raceOf(pl.name);
     if (orx) facts.push({ t: `Top 8 chance ${pct(orx.r[3])}`, hot: false });
-    facts.push({ t: `${wins}–${n - wins} record`, hot: false });
+    facts.push({ t: orx ? `${orx.r[2]}–${S.race.round - orx.r[2]} record` : `${wins}–${n - wins} record`, hot: false });
     return `<div class="facts" role="list" aria-label="Key facts">${facts.map((f) => `<span role="listitem" class="fact${f.hot ? ' hot' : ''}">${esc(f.t)}</span>`).join('')}</div>`;
   }
   // The opponent's main type, Overlord and mythic gear, and what changes if they move their Overlord.
@@ -2448,7 +2451,7 @@ details[open] > summary { margin-bottom: 10px; }
       <div class="scroll"><table class="race"><thead><tr><th>Player <span class="meta">(place now)</span></th><th>Top 8</th><th>Record</th><th>Score</th></tr></thead><tbody>
       ${rows.map((o) => `<tr class="${o.i === x.i ? 'me' : ''}"><td><span class="meta">#${o.i + 1}</span> ${esc(short(o.p[0]))}</td><td><span class="racebar"><span class="bar"><i style="width:${(o.p[3] * 100).toFixed(1)}%"></i></span><span class="pct">${pct(o.p[3])}</span></span></td><td>${o.p[2]}–${played - o.p[2]}</td><td>${fmtS(o.p[1])}</td></tr>`).join('')}
       </tbody></table></div>
-      <p class="foot">${R.runs.toLocaleString()} simulated runs of the last ${left} rounds. Each fight uses both players' latest squads and troops, mostly in their usual order, and pairing follows records the way it did on days 1–2. Checked on day 2: it expected 5.6 wins per top-16 player against 5.7 real. Points: a loss scores 66 per enemy troop killed; a win scores 300,000 plus 66 per enemy troop killed and per troop you keep.</p></section>`;
+      <p class="foot">${R.runs.toLocaleString()} simulated runs of the last ${left} rounds. Each fight uses both players' latest squads and troops, mostly in their usual order, and pairing follows records the way it did on days 1–2. Tested on day 2, starting from the round-8 standings: of the players it gave 75–95%, 84% made the top 8; of those it gave under 5%, 3% did. It assumes squads stay as they are and everyone plays every round. Points: a loss scores 66 per enemy troop killed; a win scores 300,000 plus 66 per enemy troop killed and per troop you keep.</p></section>`;
     return `<div class="grid2"><div class="stack" style="gap:16px">${head}${oppCard}</div><div class="stack" style="gap:16px">${raceCard}</div></div>`;
   }
   // When no order wins: the order that scores the most points, i.e. kills the most of their troops.
