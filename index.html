@@ -64,6 +64,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .logout { font-family: var(--cond); font-weight: 600; font-size: 13px; letter-spacing: .04em; background: none; border: 0; padding: 4px 2px; color: var(--muted); text-decoration: underline; cursor: pointer; }
 .logout:hover { color: var(--ink); }
 tr.best td { font-weight: 700; }
+.facts { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px; border-radius: 8px; background: color-mix(in oklab, var(--accent) 9%, var(--panel)); border: 1px solid color-mix(in oklab, var(--accent) 40%, var(--line)); }
+.fact { font-family: var(--cond); font-weight: 700; font-size: 13px; letter-spacing: .02em; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--field); color: var(--ink); }
+.fact.hot { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .tip { border-left: 3px solid var(--line); padding: 2px 0 2px 10px; display: flex; flex-direction: column; gap: 2px; }
 .tip.hot { border-left-color: var(--loss); }
 .tip h3 { font-size: 15px; font-weight: 700; margin: 0; }
@@ -281,7 +284,7 @@ details[open] > summary { margin-bottom: 10px; }
     sigma: 0.03,     // spread of hidden strength around listed power (lognormal sd, per squad; fitted)
     attr: 1.5,       // attrition exponent: how many troops a winner keeps (fitted on real survivor counts)
     sims: 1500,      // simulations for the live matchup
-    fitSims: 120,    // simulations per matchup when learning from history
+    fitSims: 40,     // simulations per matchup when learning from history (40 matched 120 on day-2 data and builds 3x faster)
     decay: 0.5,      // how fast older formations fade from a player's habit
     prior: 3,        // how many fights of evidence the population pattern is worth for one player
     popPrior: 2,     // pseudo-fights behind the default pattern for the population
@@ -781,7 +784,7 @@ details[open] > summary { margin-bottom: 10px; }
     if (!myPerms.length || myPerms[myPerms.length - 1] !== shownPerm) myPerms.push(shownPerm);
     var myHabit = habitDist(myPerms, opt.decay);
 
-    var W = winMatrix(c.canon, mc.canon, { bonus: opt.bonus, sigma: opt.sigma, attr: opt.attr, n: opt.sims }); // their view
+    var W = winMatrix(c.canon, mc.canon, { bonus: opt.bonus, sigma: opt.sigma, attr: opt.attr, n: q.sims || opt.sims }); // their view
     var d = expertDists({ canon: c.canon, prevPerms: prevPerms, lastResult: lastResult, W: W, oppHabit: myHabit }, opt);
     var w = pl ? model.playerW[k] : model.popW;
     var p = mixDists(d, w);
@@ -1004,7 +1007,8 @@ details[open] > summary { margin-bottom: 10px; }
   const valid = (f) => (f ? E.normSquads(f) : null);
   const short = (n) => (n.length > 20 ? n.slice(0, 19) + '…' : n);
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : (/(ch|sh|s|x)$/.test(w) ? 'es' : 's')}`;
-  const byName = (x, y) => x.localeCompare(y, undefined, { sensitivity: 'base' }) || (x < y ? -1 : x > y ? 1 : 0);
+  const NAME_COLL = typeof Intl !== 'undefined' && Intl.Collator ? new Intl.Collator(undefined, { sensitivity: 'base' }) : null;
+  const byName = (x, y) => (NAME_COLL ? NAME_COLL.compare(x, y) : x.localeCompare(y)) || (x < y ? -1 : x > y ? 1 : 0);
   const OTHER = '__other__';
 
   function chip(q) {
@@ -1025,7 +1029,7 @@ details[open] > summary { margin-bottom: 10px; }
   const demo = () => DEMO || (DEMO = E.exampleData(2026));
   // Fights come from two places: battle reports shipped with the page (data/reports.json) and fights logged in the shared database.
   const allBattles = () => (S.bundle.length ? S.bundle.concat(S.battles) : S.battles);
-  const isDemo = () => !S.battles.length && !S.bundle.length && !S.personal.myForm && !S.forceReal;
+  const isDemo = () => !S.battles.length && !S.bundle.length && !S.personal.myForm && !S.forceReal && S.bundleState !== 'loading';
   const battles = () => (isDemo() ? demo().battles : allBattles());
   function baseSettings() {
     // On a public website each visitor starts by picking their own name.
@@ -1092,9 +1096,21 @@ details[open] > summary { margin-bottom: 10px; }
   }
 
   let M = null, MK = '', WF = null, WFME = null;
+  function modelKey() {
+    const st = settings(), sr = scopeRoots();
+    return [isDemo() ? 'demo' : 'v' + S.version, st.me, st.bonus, st.sigma, st.attr, st.sims, sr ? sr.join(',') : 'all'].join('|');
+  }
+  const modelReady = () => !!M && MK === modelKey();
+  // Fitting the opponent model takes a moment on phones, so the page draws first and the call fills in after.
+  let MB = false;
+  function buildModelSoon() {
+    if (MB) return;
+    MB = true;
+    setTimeout(() => { try { model(); } finally { MB = false; } render(); }, 30);
+  }
   function model() {
     const st = settings(), sr = scopeRoots();
-    const k = [isDemo() ? 'demo' : 'v' + S.version, st.me, st.bonus, st.sigma, st.attr, st.sims, sr ? sr.join(',') : 'all'].join('|');
+    const k = modelKey();
     if (M && MK === k) return M;
     M = E.buildModel(scopedBattles(), { me: st.me, bonus: +st.bonus, sigma: +st.sigma, attr: +st.attr || 1.5, sims: +st.sims || 1500 });
     MK = k; WF = null; WFME = null;
@@ -1111,11 +1127,11 @@ details[open] > summary { margin-bottom: 10px; }
   function myForm() {
     const f = valid(settings().myForm);
     if (f) return f;
-    const m = model(), me = m.index.players[m.meKey];
+    const me = fullIndex().players[key(settings().me)];
     return me && me.entries.length ? me.entries[me.entries.length - 1].form : null;
   }
   function defaultShown(mf) {
-    const m = model(), me = m.index.players[m.meKey];
+    const me = fullIndex().players[key(settings().me)];
     const mc = E.canonical(mf).canon;
     const src = me && me.entries.length ? me.entries[me.entries.length - 1].form : mf;
     return { k: E.matchPerm(src, mc), fromLog: !!(me && me.entries.length) };
@@ -1131,19 +1147,21 @@ details[open] > summary { margin-bottom: 10px; }
 
   /* ---------- name pickers ---------- */
   function myLog() {
-    const m = model(), me = m.index.players[m.meKey];
+    const me = fullIndex().players[key(settings().me)];
     return me && me.entries.length ? me.entries[me.entries.length - 1] : null;
   }
   // Pairings go by record, so players whose record matches yours are the likeliest next opponents.
   // Only players with a fight logged in every round have a record that can be trusted.
   function likelyOpps() {
-    const m = model(), me = m.index.players[m.meKey];
+    const ix = fullIndex(), me = ix.players[key(settings().me)];
     if (!me) return [];
-    const nR = new Set(m.index.battles.map((b) => b.round)).size;
+    const G = groupInfo(), grp = G.comp[me.key];
+    const peers = Object.values(ix.players).filter((p) => G.comp[p.key] === grp);
+    const nR = new Set([].concat.apply([], peers.map((p) => p.entries.map((e) => e.round)))).size;
     const full = (p) => new Set(p.entries.map((e) => e.round)).size === nR;
     if (!full(me)) return [];
     const wins = (p) => p.entries.filter((e) => e.won).length, mw = wins(me);
-    return Object.values(m.index.players).filter((p) => p.key !== me.key && full(p))
+    return peers.filter((p) => p.key !== me.key && full(p))
       .map((p) => { const w = wins(p); return { name: p.name, w, l: p.entries.length - w, d: Math.abs(w - mw) }; })
       .filter((x) => x.d <= 1)
       .sort((a, b) => a.d - b.d || b.w - a.w || byName(a.name, b.name))
@@ -1242,20 +1260,6 @@ details[open] > summary { margin-bottom: 10px; }
       const all = Object.values(P).filter((p) => p.key !== meK);
       const list = (ps) => ps.sort((x, y) => byName(x.name, y.name)).map((p) => option(p.name, p.name, !manual && inLog && p.key === sk)).join('');
       let o = option('', 'Pick your opponent', !inLog || manual, true);
-      // Never change their lineup: your group only (all groups if you haven't picked your name).
-      const nm = neverMovers(), many = G.roots.length > 1;
-      const steady = all.filter((p) => nm.has(p.key) && (!mine || !many || G.comp[p.key] === mine)).sort((x, y) => byName(x.name, y.name));
-      if (steady.length) {
-        const where = mine && many ? ` · ${groupName(G, mine)}` : '';
-        o += `<optgroup label="Never change their lineup${esc(where)}">${steady.map((p) => option(p.name, `${p.name} · same order all ${p.entries.length} fights${!mine && many && G.label[G.comp[p.key]] ? ' · ' + G.label[G.comp[p.key]] : ''}`, false)).join('')}</optgroup>`;
-      }
-      // Mythic (M6) gear always on the same single squad, never moved: that squad is their main one.
-      const gl = gearLocked();
-      const locked = all.filter((p) => gl.has(p.key) && (!mine || !many || G.comp[p.key] === mine)).sort((x, y) => byName(x.name, y.name));
-      if (locked.length) {
-        const where = mine && many ? ` · ${groupName(G, mine)}` : '';
-        o += `<optgroup label="Mythic gear locked on one squad${esc(where)}">${locked.map((p) => option(p.name, `${p.name} · M6 always on ${gl.get(p.key)}${!mine && many && G.label[G.comp[p.key]] ? ' · ' + G.label[G.comp[p.key]] : ''}`, false)).join('')}</optgroup>`;
-      }
       if (G.roots.length > 1) {
         const order = mine ? [mine].concat(G.roots.filter((r) => r !== mine)) : G.roots;
         order.forEach((r) => {
@@ -1280,7 +1284,7 @@ details[open] > summary { margin-bottom: 10px; }
   /* ---------- opponent under scouting ---------- */
   function setOpp(name) {
     S.opp = String(name || '').trim(); S.oppText = null; S.roll = null;
-    const m = model(), pl = S.opp ? m.index.players[key(S.opp)] : null;
+    const pl = S.opp ? fullIndex().players[key(S.opp)] : null;
     const last = pl ? pl.entries[pl.entries.length - 1] : null;
     if (pl) S.oppManual = false;
     S.oppForm = last ? clone(last.form) : blank();
@@ -1296,7 +1300,7 @@ details[open] > summary { margin-bottom: 10px; }
   }
   function afterDraft(target) {
     if (target === 'opp') {
-      const m = model(), pl = m.index.players[key(S.opp)], last = pl && pl.entries[pl.entries.length - 1];
+      const pl = fullIndex().players[key(S.opp)], last = pl && pl.entries[pl.entries.length - 1];
       const v = valid(S.oppForm);
       S.oppEdited = !last || !v || !E.sameForm(v, last.form);
       S.roll = null;
@@ -1446,7 +1450,7 @@ details[open] > summary { margin-bottom: 10px; }
     S.lastDemo = demoNow;
     drawChrome();
     let html;
-    try { html = VIEW[S.view](); }
+    try { html = S.bundleState === 'loading' && !S.battles.length && S.view !== 'setup' ? '<div class="empty">Loading fights…</div>' : VIEW[S.view](); }
     catch (e) { console.error(e); html = `<div class="empty">This view hit a problem: ${esc(e.message)}</div>`; }
     document.getElementById('view').innerHTML = html;
     if (fid) {
@@ -1496,18 +1500,18 @@ details[open] > summary { margin-bottom: 10px; }
 
   /* ---------- Next fight ---------- */
   function viewNext() {
-    const m = model();
+    const ix = fullIndex();
     if (isDemo() && !S.opp && !S.oppManual) setOpp(pickDemoOpp());
     if (S.opp && !S.oppForm) setOpp(S.opp);
     const mf = myForm();
-    const pl = S.opp ? m.index.players[key(S.opp)] : null;
+    const pl = S.opp ? ix.players[key(S.opp)] : null;
     if (S.opp && S.oppVersion !== S.version) {
       const v = valid(S.oppForm);
       if (!S.oppEdited || (pl && v && pl.entries.some((e) => E.sameForm(v, e.form)))) setOpp(S.opp);
       else S.oppVersion = S.version;
     }
     const latest = pl ? pl.entries[pl.entries.length - 1] : null;
-    const mine = myLog(), meName = settings().me, hasLog = m.index.battles.length > 0;
+    const mine = myLog(), meName = settings().me, hasLog = ix.battles.length > 0;
     const likely = likelyOpps().filter((x) => key(x.name) !== key(S.opp));
     const src = isDemo() ? 'example squads' : valid(S.personal.myForm) ? 'entered by hand in <a href="#setup">Setup</a>' : mine ? `from your round ${esc(mine.round)} report` : '';
     const meNote = mf ? `<div class="row">${orderHTML(mf)}<span class="meta">${src}</span></div>`
@@ -1522,9 +1526,9 @@ details[open] > summary { margin-bottom: 10px; }
       ${likely.length ? `<div class="stack"><span class="lbl">Likely next, by record</span><div class="quick flow" role="group" aria-label="Likely next opponents">${likely.map((x) => `<button type="button" class="btn small" data-act="opp" data-name="${esc(x.name)}">${esc(short(x.name.replace(/^\[Example\] /, '')))} <span class="rec">${x.w}–${x.l}</span></button>`).join('')}</div></div>` : ''}`;
     const manualOpp = S.oppManual || (!!S.opp && !pl);
     if (S.opp || manualOpp) {
-      const meetings = pl && m.meKey ? pl.entries.filter((e) => e.oppKey === m.meKey) : [];
       const open = manualOpp || S.oppOpen || S.oppEdited;
-      opp += `<p class="meta">${latest ? `Last logged: round ${esc(latest.round)}, ${latest.won ? 'won' : 'lost'} against ${esc(latest.oppName)}.` : 'Not in the log yet. Enter the formation their battle record shows.'}${meetings.length ? ` <span class="tag hot">Rematch</span> You've met ${meetings.length === 1 ? 'once' : meetings.length + ' times'}.` : ''}</p>`;
+      opp += `<p class="meta">${latest ? `Last logged: round ${esc(latest.round)}, ${latest.won ? 'won' : 'lost'} against ${esc(latest.oppName)}.` : 'Not in the log yet. Enter the formation their battle record shows.'}</p>`;
+      opp += keyFacts(pl);
       if (!open) {
         opp += `<div class="stack"><div class="lbl"><span>Their last formation</span><span class="hint">Slot 1 fights first</span></div>${orderHTML(valid(S.oppForm) || latest.form)}
           <p class="meta">Game shows a newer one? <button type="button" class="linkbtn" data-act="oedit">Edit it</button></p></div>`;
@@ -1543,7 +1547,7 @@ details[open] > summary { margin-bottom: 10px; }
     opp += '</section>';
 
     let you = '<section class="card c-you" aria-labelledby="h-you"><div class="card-h"><h2 id="h-you">You</h2><a href="#setup">Edit squads</a></div>';
-    let pr = null;
+    let pr = null, waiting = false;
     if (mf) {
       const mc = E.canonical(mf).canon, ds = defaultShown(mf);
       const shownK = S.shownPerm != null ? S.shownPerm : ds.k;
@@ -1552,7 +1556,8 @@ details[open] > summary { margin-bottom: 10px; }
         <p class="meta">They see the formation from your last fight, the same way you see theirs.</p></div>`;
       const of = valid(S.oppForm);
       if (S.opp && of) {
-        pr = E.predict(m, { opp: S.opp, oppForm: S.oppEdited ? of : null, oppLastResult: S.oppResult, myForm: mf, myShown: E.orderSquads(mc, shownK) });
+        if (modelReady()) pr = E.predict(model(), { opp: S.opp, oppForm: S.oppEdited ? of : null, oppLastResult: S.oppResult, myForm: mf, myShown: E.orderSquads(mc, shownK) });
+        else { waiting = true; buildModelSoon(); }
       }
     } else {
       you += hasLog && !meName ? '<p>Pick your name under Matchup. Your squads fill in from your latest battle report.</p>'
@@ -1562,6 +1567,7 @@ details[open] > summary { margin-bottom: 10px; }
 
     let out;
     if (pr) out = heroCard(pr) + ovCard(pr, mf) + predCard(pr) + scoutCard(pl, pr, mf) + mixCard(pr) + mxCard(pr);
+    else if (waiting) out = '<section class="card hero c-hero"><div class="card-h"><h2>Play this order</h2></div><div class="empty">Working out the call…</div></section>';
     else {
       const msg = !mf ? (hasLog && !meName ? 'Pick your name to get a call.' : 'Add your squads in Setup to get a call.') : !S.opp ? (S.oppManual ? 'Type their name and formation to get a call.' : 'Pick your opponent to get a call.') : 'Enter type and power for all three of their squads to get a call.';
       out = `<section class="card hero c-hero"><div class="card-h"><h2>Play this order</h2></div><div class="empty">${msg}</div></section>`;
@@ -1575,9 +1581,10 @@ details[open] > summary { margin-bottom: 10px; }
     if (!ex || !ex.ov || !(ex.op > 0) || !mf.some((q) => q.id === ex.ov)) return '';
     const m = model(), of = valid(S.oppForm), mc = E.canonical(mf).canon;
     const shownK = S.shownPerm != null ? S.shownPerm : defaultShown(mf).k;
-    const spots = [{ id: ex.ov, pr }].concat(mf.map((q) => q.id).filter((id) => id && id !== ex.ov).map((id) => ({
-      id, pr: E.predict(m, { opp: S.opp, oppForm: S.oppEdited ? of : null, oppLastResult: S.oppResult, myForm: E.moveOverlord(mf, ex, id), myShown: E.orderSquads(mc, shownK) })
-    }))).filter((x) => x.pr).map((x) => Object.assign(x, { ev: x.pr.ev[x.pr.best] }));
+    // Every row (the current spot too) uses the same lighter simulation, so the rows compare fairly.
+    const spots = mf.map((q) => q.id).filter(Boolean).sort((a, b) => (a === ex.ov ? -1 : b === ex.ov ? 1 : 0)).map((id) => ({
+      id, pr: E.predict(m, { opp: S.opp, oppForm: S.oppEdited ? of : null, oppLastResult: S.oppResult, myForm: id === ex.ov ? mf : E.moveOverlord(mf, ex, id), myShown: E.orderSquads(mc, shownK), sims: 600 })
+    })).filter((x) => x.pr).map((x) => Object.assign(x, { ev: x.pr.ev[x.pr.best] }));
     const now = spots[0], best = spots.slice().sort((a, b) => b.ev - a.ev)[0], main = E.mainType(ex.tb);
     const head = best.id === now.id || best.ev - now.ev < 0.03
       ? `Keep it on ${esc(teamLabel(mf, now.id))}. Moving it doesn't improve this matchup.`
@@ -1590,6 +1597,37 @@ details[open] > summary { margin-bottom: 10px; }
       </tbody></table></div>
       <p class="foot">${main ? `Your main type is ${E.TYPE_NAME[main]} (highest type bonus, our stand-in for mastery). ` : ''}Most players keep the Overlord on their main squad, next to their best gear. Moving it shifts only the Overlord's own power, not your gear.</p>
     </section>`;
+  }
+  // Key facts about the chosen opponent, highlighted under their name in the Matchup card.
+  function keyFacts(pl) {
+    if (!pl || !pl.entries.length) return '';
+    const es = pl.entries, n = es.length, facts = [];
+    const wins = es.filter((e) => e.won).length;
+    const canon = E.canonical(es[n - 1].form).canon, perms = es.map((e) => E.matchPerm(e.form, canon));
+    if (n >= 3 && new Set(perms).size === 1) facts.push({ t: `Same order all ${n} fights`, hot: true });
+    else if (n >= 3) {
+      let kept = 0;
+      for (let i = 1; i < n; i++) if (perms[i] === perms[i - 1]) kept++;
+      const r = kept / (n - 1);
+      facts.push({ t: r >= 0.7 ? `Usually keeps their order (${kept} of ${n - 1})` : r <= 0.3 ? `Changes order often (kept it ${kept} of ${n - 1})` : `Sometimes changes order (kept it ${kept} of ${n - 1})`, hot: r >= 0.7 });
+    }
+    const h = habitsOf(pl);
+    if (h) {
+      const tt = (id) => TS[h.types[id]] || 'team ' + id;
+      if (h.tbs.length) {
+        const bal = h.tbs.length > 1 && h.tbs[0][1] - h.tbs[1][1] < 0.03;
+        facts.push({ t: bal ? 'Balanced main type' : `${E.TYPE_NAME[h.tbs[0][0]]} main`, hot: !bal });
+      }
+      if (h.ov) facts.push(h.ovMoves ? { t: `Moves their Overlord (${plural(h.ovMoves, 'time')})`, hot: true } : { t: `Overlord ${h.ovN >= 3 ? 'locked on' : 'on'} ${tt(h.ov)}`, hot: h.ovN >= 3 });
+      if (h.m6Total) facts.push(h.gearMoves ? { t: `Moves mythic gear (${plural(h.gearMoves, 'time')})`, hot: true }
+        : h.gearLocked ? { t: `Mythic gear locked on ${tt(h.m6Teams[0])}`, hot: true }
+        : { t: `Mythic gear on ${h.m6Teams.map(tt).join(' + ')}${h.n >= 3 ? ', never moved' : ''}`, hot: h.n >= 3 });
+      else facts.push({ t: 'No mythic gear', hot: false });
+    }
+    const meK = key(settings().me), met = es.filter((e) => e.oppKey === meK);
+    if (met.length) { const last = met[met.length - 1]; facts.push({ t: `Rematch: you ${last.won ? 'lost' : 'won'} round ${last.round}`, hot: true }); }
+    facts.push({ t: `${wins}–${n - wins} record`, hot: false });
+    return `<div class="facts" role="list" aria-label="Key facts">${facts.map((f) => `<span role="listitem" class="fact${f.hot ? ' hot' : ''}">${esc(f.t)}</span>`).join('')}</div>`;
   }
   // The opponent's main type, Overlord and mythic gear, and what changes if they move their Overlord.
   function scoutCard(pl, pr, mf) {
@@ -1612,9 +1650,10 @@ details[open] > summary { margin-bottom: 10px; }
     let alt = '';
     if (h.ov && h.op > 0 && !S.oppEdited && mf) {
       const m = model(), mc = E.canonical(mf).canon, shownK = S.shownPerm != null ? S.shownPerm : defaultShown(mf).k;
-      const now = pr.ev[pr.best];
+      const base = E.predict(m, { opp: S.opp, oppForm: h.last.form, oppHypo: true, oppLastResult: S.oppResult, myForm: mf, myShown: E.orderSquads(mc, shownK), sims: 600 });
+      const now = base ? base.ev[pr.best] : pr.ev[pr.best];
       const lines = h.last.form.map((q) => q.id).filter((id) => id && id !== h.ov).map((id) => {
-        const p2 = E.predict(m, { opp: S.opp, oppForm: E.moveOverlord(h.last.form, h.ex, id), oppHypo: true, oppLastResult: S.oppResult, myForm: mf, myShown: E.orderSquads(mc, shownK) });
+        const p2 = E.predict(m, { opp: S.opp, oppForm: E.moveOverlord(h.last.form, h.ex, id), oppHypo: true, oppLastResult: S.oppResult, myForm: mf, myShown: E.orderSquads(mc, shownK), sims: 600 });
         return p2 && { id, p2, keep: p2.ev[pr.best], best: p2.ev[p2.best] };
       }).filter(Boolean);
       const matters = lines.filter((x) => now - x.keep >= 0.05 || x.p2.best !== pr.best && x.best - x.keep >= 0.05);
