@@ -343,8 +343,10 @@ details[open] > summary { margin-bottom: 10px; }
     sigma: 0.017,    // spread of hidden strength around true strength p * x (lognormal sd, per squad; fitted)
     sigma0: 0.03,    // the same for a squad with no strength reading (typed in by hand): spread around listed power
     attr: 1.5,       // (old rules only) attrition exponent
-    keepA: 8.0,      // an encounter's winner keeps (1 - rho^keepA)^keepB of its troops, rho = loser's strength / winner's
-    keepB: 0.86,
+    keepA: 5.21,     // an encounter's winner keeps (1 - keepF) * (1 - exp(-(keepA*u + keepC*u*u)))^keepB of its troops,
+    keepC: 10.74,    // u = ln(winner's strength / loser's). Refitted 2026-11-18 on 11,116 fresh encounters: the first rule
+    keepB: 0.675,    // (keepA 8, keepB 0.86, no keepC or keepF) matched close encounters but overstated the winner's losses
+    keepF: 0.0024,   // in lopsided ones (2x at a ratio of 1.45, 3x at 1.65). Real losses bottom out near a quarter percent.
     eta: 0.41,       // a squad with a share f of its troops left fights at f^eta of its strength (not f: heroes do most of the work)
     ovValue: 0.52,   // 1M of listed Overlord power is worth this much true strength to the squad that carries it (54 clean moves)
     prof: 0.033,     // War Leader edge on LISTED power, used only for squads without a strength reading (x already includes it)
@@ -549,9 +551,14 @@ details[open] > summary { margin-bottom: 10px; }
   // The fight ends when one side has no squads left (3 to 5 encounters).
   // Returns 1 if side A wins, 0 if B wins, 0.5 on a full mutual wipe.
   // legacy = the rules before the strength model (strength falls in step with troops; winner keeps (1 - rho^2k)^(1/2k)).
+  // Share of its troops the winner of an encounter keeps; hi and lo are the two strengths going in (hi > lo).
+  function keepShare(hi, lo) {
+    var u = Math.log(hi / lo);
+    return (1 - DEFAULTS.keepF) * Math.pow(1 - Math.exp(-(DEFAULTS.keepA * u + DEFAULTS.keepC * u * u)), DEFAULTS.keepB);
+  }
   function fight(PA, PB, SA, SB, mAB, mBA, k, legacy) {
     var qa = [PA[0], PA[1], PA[2]], qb = [PB[0], PB[1], PB[2]], fa = [1, 1, 1], fb = [1, 1, 1], k2 = 2 * k;
-    var KA = DEFAULTS.keepA, KB = DEFAULTS.keepB, ETA = DEFAULTS.eta;
+    var ETA = DEFAULTS.eta;
     while (qa.length && qb.length) {
       var a = qa.shift(), b = qb.shift(), ea, eb;
       if (legacy) {
@@ -560,8 +567,8 @@ details[open] > summary { margin-bottom: 10px; }
         else if (eb > ea) { fb[b] *= Math.pow(1 - Math.pow(ea / eb, k2), 1 / k2); qb.push(b); }
       } else {
         ea = SA[a] * Math.pow(fa[a], ETA) * mAB[a][b]; eb = SB[b] * Math.pow(fb[b], ETA) * mBA[b][a];
-        if (ea > eb) { fa[a] *= Math.pow(1 - Math.pow(eb / ea, KA), KB); qa.push(a); }
-        else if (eb > ea) { fb[b] *= Math.pow(1 - Math.pow(ea / eb, KA), KB); qb.push(b); }
+        if (ea > eb) { fa[a] *= keepShare(ea, eb); qa.push(a); }
+        else if (eb > ea) { fb[b] *= keepShare(eb, ea); qb.push(b); }
       }
     }
     return qa.length ? 1 : (qb.length ? 0 : 0.5);
@@ -1116,7 +1123,7 @@ details[open] > summary { margin-bottom: 10px; }
     DEFAULT_W: DEFAULT_W, DEFAULTS: DEFAULTS,
     normType: normType, normPower: normPower, normSquads: normSquads, normBattle: normBattle, battleKey: battleKey, keyOf: keyOf,
     canonical: canonical, matchPerm: matchPerm, orderSquads: orderSquads, strongestIndex: strongestIndex,
-    extrasOf: extrasOf, moveOverlord: moveOverlord, mainType: mainType, bestGeared: bestGeared, eff: eff, spread: spread, LEGACY: LEGACY,
+    extrasOf: extrasOf, moveOverlord: moveOverlord, mainType: mainType, bestGeared: bestGeared, eff: eff, spread: spread, LEGACY: LEGACY, keepShare: keepShare,
     winMatrix: winMatrix, flipMatrix: flipMatrix, winProb: winProb, profMult: profMult, solveZeroSum: solveZeroSum,
     bestResponse: bestResponse, minResponse: minResponse, habitDist: habitDist, expertDists: expertDists, mixDists: mixDists,
     fitWeights: fitWeights, buildIndex: buildIndex, buildModel: buildModel, walkForward: walkForward, habitStats: habitStats,
@@ -1181,15 +1188,16 @@ details[open] > summary { margin-bottom: 10px; }
   // One fight. A and B are squads in slot order; SA/SB their real strengths this time; trA/trB their troops.
   // Returns [result for A (1 win, 0 loss, 0.5 both out), points A, points B].
   // Rules (engine DEFAULTS, fitted on 13,568 logged encounters): a squad with a share f of its troops left fights at
-  // f^eta of its strength; the winner keeps (1 - rho^keepA)^keepB of the troops it had, rho = loser's strength / winner's.
+  // f^eta of its strength; the winner keeps E.keepShare(winner's strength, loser's) of the troops it had (the engine's rule,
+  // refitted 2026-11-18 so that lopsided encounters cost the winner as little as they really do).
   function fightPts(SA, SB, trA, trB, tA, tB, bonus, k) {
     var qa = [0, 1, 2], qb = [0, 1, 2], fa = [1, 1, 1], fb = [1, 1, 1];
-    var KA = E.DEFAULTS.keepA, KB = E.DEFAULTS.keepB, ETA = E.DEFAULTS.eta;
+    var ETA = E.DEFAULTS.eta, keep = E.keepShare || function (hi, lo) { return Math.pow(1 - Math.pow(lo / hi, E.DEFAULTS.keepA), E.DEFAULTS.keepB); };
     while (qa.length && qb.length) {
       var a = qa.shift(), b = qb.shift();
       var ea = SA[a] * Math.pow(fa[a], ETA) * (E.BEATS[tA[a]] === tB[b] ? 1 + bonus : 1), eb = SB[b] * Math.pow(fb[b], ETA) * (E.BEATS[tB[b]] === tA[a] ? 1 + bonus : 1);
-      if (ea > eb) { fa[a] *= Math.pow(1 - Math.pow(eb / ea, KA), KB); fb[b] = 0; qa.push(a); }
-      else if (eb > ea) { fb[b] *= Math.pow(1 - Math.pow(ea / eb, KA), KB); fa[a] = 0; qb.push(b); }
+      if (ea > eb) { fa[a] *= keep(ea, eb); fb[b] = 0; qa.push(a); }
+      else if (eb > ea) { fb[b] *= keep(eb, ea); fa[a] = 0; qb.push(b); }
       else { fa[a] = 0; fb[b] = 0; }
     }
     var killA = 0, killB = 0, leftA = 0, leftB = 0;
