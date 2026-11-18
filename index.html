@@ -2224,12 +2224,16 @@ details[open] > summary { margin-bottom: 10px; }
       out += `<tr><th>${E.TYPE_NAME[t]} exclusive weapons</th><td class="${va && vb && va.p > vb.p ? 'up' : ''}">${show(va)}</td>${b ? `<td class="${va && vb && vb.p > va.p ? 'up' : ''}">${show(vb)}</td>` : ''}</tr>`;
     });
     out += num('Overlord level', a.ol != null ? a.ol : null, b && b.ol != null ? b.ol : null, '');
+    if (a.ob != null || (b && b.ob != null)) out += num('Overlord bond rating', a.ob != null ? a.ob : null, b && b.ob != null ? b.ob : null, '');
+    if (a.ot || (b && b.ot)) ['attack', 'defense', 'HP'].forEach((nm, i) => { out += num(`Overlord ${nm} training`, a.ot ? a.ot[i] : null, b && b.ot ? b.ot[i] : null, ''); });
+    const skl = (sc) => (sc && sc.os && sc.os.length ? { n: sc.os.reduce((s, v) => s + v, 0), s: sc.os.join(' ') } : null), ska = skl(a), skb = b ? skl(b) : null;
+    if (ska || skb) out += `<tr><th>Overlord skills <span class="meta">(level of each)</span></th><td class="${ska && skb && ska.n > skb.n ? 'up' : ''}">${ska ? ska.s : '<span class="meta">–</span>'}</td>${b ? `<td class="${ska && skb && skb.n > ska.n ? 'up' : ''}">${skb ? skb.s : '<span class="meta">–</span>'}</td>` : ''}</tr>`;
     out += num('Drone level', a.dl != null ? a.dl : null, b && b.dl != null ? b.dl : null, '');
     out += num('Decorations, top tier <span class="meta">(total levels)</span>', a.dc[1], b ? b.dc[1] : null, '');
     out += num('Decorations, next tier <span class="meta">(total levels)</span>', a.dc[3], b ? b.dc[3] : null, '');
     return `<div class="lbl"><span>Research and upgrades</span><span class="hint">from their latest battle report</span></div>
       <div class="scroll"><table class="sct"><thead><tr><th></th><th>${esc(short(pl.name))}</th>${b ? '<th>You</th>' : ''}</tr></thead><tbody>${out}</tbody></table></div>
-      <p class="meta">Research is how much of each tree is done. Siege to Seize counts when you are the attacker and Defense Fortifications when you defend, and the game picks the attacker at random. In the reports both give their full +30% hero bonus from 70% on. Exclusive weapon levels are read off each weapon's power (30, 20+, 10+, under 10; – means none), one per hero.</p>`;
+      <p class="meta">Research is how much of each tree is done. Siege to Seize counts when you are the attacker and Defense Fortifications when you defend, and the game picks the attacker at random. In the reports both give their full +30% hero bonus from 70% on. Exclusive weapon levels are read off each weapon's power (30, 20+, 10+, under 10; – means none), one per hero. The Overlord's bond rating, specialized training and skill levels are as the report states them; a fifth skill shows once it is unlocked.</p>`;
   }
   // The opponent's main type, Overlord and mythic gear, and what changes if they move their Overlord.
   function scoutCard(pl, pr, mf) {
