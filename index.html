@@ -2129,7 +2129,7 @@ details[open] > summary { margin-bottom: 10px; }
     you += '</section>';
 
     let out;
-    if (pr) { const plan = killPlan(pr, pl), kill = pr.ev[pr.best] < 0.1 ? plan : null; byPoints(pr, plan); out = (kill ? killCard(pr, kill) : heroCard(pr, plan)) + ovCard(pr, mf) + predCard(pr) + scoutCard(pl, pr, mf) + mixCard(pr) + mxCard(pr); }
+    if (pr) { const plan = killPlan(pr, pl), kill = pr.ev[pr.best] < 0.1 ? plan : null; byPoints(pr, plan); const ovi = ovSpots(mf, pl); out = (kill ? killCard(pr, kill) : heroCard(pr, plan, ovi)) + ovCard(ovi) + predCard(pr) + scoutCard(pl, pr, mf) + mixCard(pr) + mxCard(pr); }
     else if (waiting) out = '<section class="card hero c-hero"><div class="card-h"><h2>Play this order</h2></div><div class="empty">Working out the call…</div></section>';
     else {
       const msg = !mf ? (hasLog && !meName ? 'Pick your name to get a call.' : 'Add your squads in Setup to get a call.') : !S.opp ? (S.oppManual ? 'Type their name and formation to get a call.' : 'Pick your opponent to get a call.') : 'Enter type and power for all three of their squads to get a call.';
@@ -2139,26 +2139,53 @@ details[open] > summary { margin-bottom: 10px; }
   }
   // Your Overlord: the same call with it on each of your teams. Only when your squads come from a battle report,
   // since that is what shows where the Overlord sits and how much power it adds.
-  function ovCard(pr, mf) {
+  // Your Overlord on each of your squads, each with its own best order. The spots are compared by expected points,
+  // since the standings go by score (by win chance only when points cannot be worked out).
+  const OV_MIN_PTS = 1000;
+  const squadName = (form, id) => { const q = (form || []).find((y) => y.id === id); return q ? `${E.TYPE_NAME[q.t] || 'mixed'} squad` : `team ${id}`; };
+  function ovSpots(mf, pl) {
     const mine = myLog(), ex = !isDemo() && !valid(S.personal.myForm) && mine && mine.ex;
-    if (!ex || !ex.ov || !(ex.op > 0) || !mf.some((q) => q.id === ex.ov)) return '';
+    if (!ex || !ex.ov || !(ex.op > 0) || !mf.some((q) => q.id === ex.ov)) return null;
     const m = model(), of = valid(S.oppForm), mc = E.canonical(mf).canon;
     const shownK = S.shownPerm != null ? S.shownPerm : defaultShown(mf).k;
     // Every row (the current spot too) uses the same lighter simulation, so the rows compare fairly.
     const spots = mf.map((q) => q.id).filter(Boolean).sort((a, b) => (a === ex.ov ? -1 : b === ex.ov ? 1 : 0)).map((id) => ({
       id, pr: E.predict(m, { opp: S.opp, oppForm: S.oppEdited ? of : null, oppLastResult: S.oppResult, myForm: id === ex.ov ? mf : E.moveOverlord(mf, ex, id), myShown: E.orderSquads(mc, shownK), sims: 600 })
-    })).filter((x) => x.pr).map((x) => Object.assign(x, { ev: x.pr.ev[x.pr.best] }));
-    const now = spots[0], best = spots.slice().sort((a, b) => b.ev - a.ev)[0], main = E.mainType(ex.tb);
-    const head = best.id === now.id || best.ev - now.ev < 0.03
-      ? `Keep it on ${esc(teamLabel(mf, now.id))}. Moving it doesn't improve this matchup.`
-      : `Moving it to ${esc(teamLabel(mf, best.id))} raises your chance from ${pct(now.ev)} to ${pct(best.ev)}, with the order shown for that row.`;
+    })).filter((x) => x.pr);
+    if (!spots.length || spots[0].id !== ex.ov) return null;
+    spots.forEach((x) => { x.plan = killPlan(x.pr, pl, x.id === ex.ov ? null : { from: ex.ov, to: x.id }); byPoints(x.pr, x.plan); x.ev = x.pr.ev[x.pr.best]; x.pts = x.plan && x.plan.exp ? x.plan.exp[x.pr.best] : null; });
+    const now = spots[0], hasPts = spots.every((x) => x.pts != null);
+    const best = spots.slice().sort((a, b) => (hasPts ? b.pts - a.pts : b.ev - a.ev))[0];
+    const gainPts = hasPts ? best.pts - now.pts : 0, gainEv = best.ev - now.ev;
+    return { ex, mf, spots, now, best, hasPts, gainPts, gainEv, move: best.id !== now.id && (hasPts ? gainPts >= OV_MIN_PTS : gainEv >= 0.03) };
+  }
+  // One line in the main call when moving the Overlord is worth it.
+  function ovLine(o) {
+    if (!o || !o.move) return '';
+    const order = minis(E.orderSquads(o.best.pr.myCanon, o.best.pr.best));
+    return `<p class="callout key"><b>Better still, move your Overlord to your ${esc(squadName(o.mf, o.best.id))}:</b> ${o.hasPts ? `about ${kpts(o.gainPts)} more points${Math.abs(o.gainEv) >= 0.01 ? ` (win chance ${pct(o.now.ev)} to ${pct(o.best.ev)})` : ''}` : `your chance goes from ${pct(o.now.ev)} to ${pct(o.best.ev)}`}, playing ${order}. Details under Your Overlord.</p>`;
+  }
+  function ovCard(o) {
+    if (!o) return '';
+    const { ex, mf, spots, now, best, hasPts, gainPts, gainEv, move } = o;
+    const chance = Math.abs(gainEv) >= 0.01 ? ` Your win chance goes from ${pct(now.ev)} to ${pct(best.ev)}.` : '';
+    const head = hasPts
+      ? (move ? `Move it to your ${esc(squadName(mf, best.id))}: about <b>${kpts(gainPts)}</b> more points (${kpts(best.pts)} expected against ${kpts(now.pts)} where it is), with the order shown for that row.${chance}`
+        : best.id !== now.id ? `It scores about the same on any squad here: your ${esc(squadName(mf, best.id))} is ahead by under 1K (${kpts(best.pts)} against ${kpts(now.pts)} where it is).`
+          : `It scores the most where it is: about ${kpts(now.pts)} expected.`)
+      : (move ? `Moving it to your ${esc(squadName(mf, best.id))} raises your chance from ${pct(now.ev)} to ${pct(best.ev)}, with the order shown for that row.`
+        : `Keep it on your ${esc(squadName(mf, now.id))}. Moving it doesn't improve this matchup.`);
+    const me = fullIndex().players[key(settings().me)], tc = me && me.sc && me.sc.tc;
+    const ms = tc ? [['T', tc[5]], ['M', tc[6]], ['A', tc[7]]].sort((x, y) => y[1] - x[1]) : null;
+    const mastery = !ms ? '' : ms[2][1] >= 80 ? `Your Mastery is ${ms[2][1] === 100 && ms[0][1] === 100 ? '100%' : ms[2][1] + '% or more'} in all three types, so the Overlord and your gear lose nothing on any squad: put them where they counter. `
+      : `Your ${E.TYPE_NAME[ms[0][0]]} Mastery is ${ms[0][1]}% (${E.TYPE_NAME[ms[1][0]]} ${ms[1][1]}%, ${E.TYPE_NAME[ms[2][0]]} ${ms[2][1]}%). A squad without mastery fights about 10% weaker at the same listed power, which the strengths here already include. `;
     return `<section class="card c-ov" aria-labelledby="h-ov">
       <div class="card-h"><h2 id="h-ov">Your Overlord</h2><span class="aside">${fmtP(ex.op)}M listed, worth about ${fmtP(ex.op * E.DEFAULTS.ovValue)}M in a fight</span></div>
-      <p class="callout">${head}</p>
-      <div class="scroll"><table><thead><tr><th>Overlord on</th><th>Best order</th><th>Chance</th></tr></thead><tbody>
-        ${spots.map((x) => `<tr${x === best && best.ev - now.ev >= 0.03 ? ' class="best"' : ''}><td>${esc(teamLabel(mf, x.id))}${x === now ? ' <span class="meta">now</span>' : ''}</td><td>${permHTML(x.pr.myCanon, x.pr.best)}</td><td>${pct(x.ev)}</td></tr>`).join('')}
+      <p class="callout${move ? ' key' : ''}">${head}</p>
+      <div class="scroll"><table><thead><tr><th>Overlord on</th><th>Best order</th>${hasPts ? '<th>Points</th>' : ''}<th>Chance</th></tr></thead><tbody>
+        ${spots.map((x) => `<tr${x === best && move ? ' class="best"' : ''}><td>${esc(teamLabel(mf, x.id))}${x === now ? ' <span class="meta">now</span>' : ''}</td><td>${permHTML(x.pr.myCanon, x.pr.best)}</td>${hasPts ? `<td>${kpts(x.pts)}</td>` : ''}<td>${pct(x.ev)}</td></tr>`).join('')}
       </tbody></table></div>
-      <p class="foot">${main ? `Your main type is ${E.TYPE_NAME[main]} (highest type bonus, our stand-in for mastery). ` : ''}Most players keep the Overlord on their main squad, next to their best gear. Moving it shifts the Overlord's own power and the few hundred troops it brings, not your gear. In 54 logged moves the squad that received an Overlord gained about half its listed power in true strength.</p>
+      <p class="foot">${mastery}Moving it shifts the Overlord's own power and the few hundred troops it brings, not your gear. In 54 logged moves the squad that received an Overlord gained about half its listed power in true strength.</p>
     </section>`;
   }
   // Key facts about the chosen opponent, highlighted under their name in the Matchup card.
@@ -2184,6 +2211,15 @@ details[open] > summary { margin-bottom: 10px; }
       if (h.tbs.length) {
         const bal = h.tbs.length > 1 && h.tbs[0][1] - h.tbs[1][1] < 0.03;
         facts.push({ t: bal ? 'Balanced main type' : `${E.TYPE_NAME[h.tbs[0][0]]} main`, hot: !bal });
+      }
+      if (pl.sc && pl.sc.tc) {
+        // Mastery research from their latest report. With one mastered type the Overlord and best gear stay on it;
+        // with all three they can go anywhere.
+        const ms = [['T', pl.sc.tc[5]], ['M', pl.sc.tc[6]], ['A', pl.sc.tc[7]]].sort((x, y) => y[1] - x[1]), hi = ms.filter((x) => x[1] >= 80);
+        if (hi.length === 3) facts.push({ t: 'Mastery in all three types: can put Overlord and gear on any squad', hot: true });
+        else if (hi.length === 2) facts.push({ t: `Mastery in ${TS[hi[0][0]]} and ${TS[hi[1][0]]} (${TS[ms[2][0]]} ${ms[2][1]}%)`, hot: false });
+        else if (hi.length === 1) facts.push({ t: `Only ${TS[ms[0][0]]} mastery (${TS[ms[1][0]]} ${ms[1][1]}%, ${TS[ms[2][0]]} ${ms[2][1]}%)`, hot: true });
+        else facts.push({ t: `No mastery above 80% (best ${TS[ms[0][0]]} ${ms[0][1]}%)`, hot: false });
       }
       if (h.ov) facts.push(h.ovMoves ? { t: `Moves their Overlord (${plural(h.ovMoves, 'time')})`, hot: true } : { t: `Overlord ${h.ovN >= 3 ? 'locked on' : 'on'} ${tt(h.ov)}`, hot: h.ovN >= 3 });
       if (h.gearMoves) facts.push({ t: `Moves gear between squads (${plural(h.gearMoves, 'time')})`, hot: true });
@@ -2286,21 +2322,21 @@ details[open] > summary { margin-bottom: 10px; }
     }
     return pr.prof && pr.prof.me && pr.prof.opp && pr.prof.me !== pr.prof.opp ? `<p class="meta">${pr.prof.me === 'W' ? 'You are a War Leader and they are an Engineer: your' : 'They are a War Leader and you are an Engineer: their'} squads count about ${Math.round(pr.prof.bonus * 100)}% stronger than listed here.</p>` : '';
   }
-  // Seeding goes by total score, so when the win is safe (90%+) the call is the order that scores the most points
-  // among the orders that win about as often (within 2 points of the best win chance).
+  // The standings go by total score, so the call is always the order with the most expected points: a win is worth
+  // 300K plus 66 per enemy troop killed and per own troop left, a loss 66 per enemy troop killed.
   function byPoints(pr, plan) {
-    if (!plan || !plan.exp || !(pr.ev[pr.best] >= 0.9)) return;
-    const top = pr.ev[pr.best], ok = (i) => (pr.ev[i] >= top - 0.02 ? 1 : 0);
-    pr.ranked = pr.ranked.slice().sort((a, b) => (ok(b) - ok(a)) || (ok(a) && ok(b) ? plan.exp[b] - plan.exp[a] : 0));
-    pr.best = pr.ranked[0]; pr.byPoints = pr.ranked.filter(ok).length;
+    if (!plan || !plan.exp) return;
+    pr.evBest = pr.best; // the order with the best win chance, kept for reference
+    pr.ranked = pr.ranked.slice().sort((a, b) => plan.exp[b] - plan.exp[a]);
+    pr.best = pr.ranked[0]; pr.byPoints = pr.ev[pr.best] >= 0.9 ? 6 : 1;
   }
   function pointsLine(pr, plan) {
     if (!plan || !plan.exp) return '';
-    const b = pr.best;
-    if (pr.byPoints > 1) { const nx = pr.ranked[1]; return `<p class="callout key"><b>Best for points:</b> about <b>${kpts(plan.exp[b])}</b> expected, ${plan.exp[b] - plan.exp[nx] >= 1000 ? `${kpts(plan.exp[b] - plan.exp[nx])} more than the next best order` : 'level with the next best order'}. ${plural(pr.byPoints, 'order')} win${pr.byPoints === 1 ? 's' : ''} about as often, so the call goes by points.</p>`; }
-    return `<p class="callout">Points: about <b>${kpts(plan.exp[b])}</b> expected with this order.</p>`;
+    const b = pr.best, nx = pr.ranked[1], d = plan.exp[b] - plan.exp[nx];
+    const alt = pr.evBest != null && pr.evBest !== b && pr.ev[pr.evBest] - pr.ev[b] >= 0.01 ? ` The order with the best win chance (${pct(pr.ev[pr.evBest])}) would score about ${kpts(plan.exp[pr.evBest])}.` : '';
+    return `<p class="callout key"><b>Best for points:</b> about <b>${kpts(plan.exp[b])}</b> expected, ${d >= 1000 ? `${kpts(d)} more than the next best order` : 'level with the next best order'}. The call always goes by expected points, because the standings do.${alt}</p>`;
   }
-  function heroCard(pr, plan) {
+  function heroCard(pr, plan, ovi) {
     const b = pr.best, ev = pr.ev[b], gain = ev - pr.nash.value;
     const others = pr.ranked.slice(1);
     const minAll = Math.min.apply(null, pr.worst), maxAll = Math.max.apply(null, pr.ev);
@@ -2312,6 +2348,7 @@ details[open] > summary { margin-bottom: 10px; }
       <div class="big-row"><span class="big-num">${pct(ev)}</span><span class="cap">chance to win if they play the way the model expects</span></div>
       ${strengthNote(pr)}
       ${pointsLine(pr, plan)}
+      ${ovLine(ovi)}
       ${ev >= 0.35 && ev <= 0.65 ? '<p class="callout key"><b>Key match:</b> about even. Toss-ups like this decide the top 8, so check their latest formation in the game before you lock in.</p>' : ''}
       ${lopsided ? `<p class="callout">${lopsided}</p>` : `<p class="callout">Worst case ${pct(pr.worst[b])}, if they play ${minis(E.orderSquads(pr.theirCanon, pr.worstAgainst[b]))}. ${gain < 0.02 ? 'Reading this player barely helps here, so the safe mix below is about as good.' : `The safe mix only guarantees ${pct(pr.nash.value)}.`}</p>`}
       <div class="scroll"><table><thead><tr><th>Other orders</th>${plan && plan.exp ? '<th>Points</th>' : ''}<th>If predicted</th>${pr.byPoints > 1 ? '' : '<th>Worst case</th>'}</tr></thead><tbody>
@@ -2545,7 +2582,7 @@ details[open] > summary { margin-bottom: 10px; }
     return { mine: m, theirs: t, pts };
   }
   const TIP_MIN = 20000;  // an order tip needs to be worth at least this many points
-  const kpts = (v) => (Math.abs(v) >= 999500 ? `${(v / 1e6).toFixed(2)}M` : `${Math.round(v / 1000).toLocaleString()}K`);
+  const kpts = (v) => (Math.abs(v) >= 999500 ? `${(v / 1e6).toFixed(3)}M` : `${Math.round(v / 1000).toLocaleString()}K`);
   // Every logged fight of one player, replayed with each of their six orders against the order the opponent really played.
   // Points count as the game counts them (a win: 300,000 + 66 per enemy troop killed and per own troop kept; a loss: 66
   // per enemy troop killed), so an order can be better without changing who wins.
@@ -2737,11 +2774,20 @@ details[open] > summary { margin-bottom: 10px; }
     return `<div class="grid2"><div class="stack" style="gap:16px">${head}${oppCard}</div><div class="stack" style="gap:16px">${raceCard}</div></div>`;
   }
   // When no order wins: the order that scores the most points, i.e. kills the most of their troops.
-  function killPlan(pr, pl) {
+  // Troops by team id with the Overlord (and the troops it brings) moved to another team.
+  function troopsMoved(tm, fromId, toId) {
+    const out = Object.assign({}, tm), f = String(fromId), t = String(toId);
+    if (out[f] == null || out[t] == null || f === t) return out;
+    const rest = Object.keys(out).filter((k) => k !== f).map((k) => out[k]);
+    const d = rest.length ? out[f] - rest.reduce((a, b) => a + b, 0) / rest.length : 0;
+    if (d > 0) { out[f] -= d; out[t] += d; }
+    return out;
+  }
+  function killPlan(pr, pl, ovMove) {
     const D = window.DuelRace;
     if (!D) return null;
     const me = fullIndex().players[key(settings().me)];
-    const tmMe = me ? D.troopsOf(me.entries) : {}, tmOpp = pl ? D.troopsOf(pl.entries) : {};
+    const tm0 = me ? D.troopsOf(me.entries) : {}, tmMe = ovMove ? troopsMoved(tm0, ovMove.from, ovMove.to) : tm0, tmOpp = pl ? D.troopsOf(pl.entries) : {};
     const avgOf = (m) => { const v = Object.values(m); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0; };
     const fbMe = avgOf(tmMe) || avgOf(tmOpp) || 2800, fbOpp = avgOf(tmOpp) || fbMe;
     const trMine = pr.myCanon.map((q) => (q.id != null && tmMe[String(q.id)]) || fbMe);
@@ -2894,7 +2940,7 @@ details[open] > summary { margin-bottom: 10px; }
       ${squads}</section>`;
     const sim = `<section class="card" aria-labelledby="h-sim"><div class="card-h"><h2 id="h-sim">Fight simulator</h2></div>
       <div class="three">
-        <div class="field"><label class="lbl" for="set-bonus">Counter edge, %</label><input id="set-bonus" type="text" inputmode="decimal" value="${+(st.bonus2 * 100).toFixed(2)}"${ro}><p class="meta">A squad whose type beats its opponent's fights as if it were this much stronger.</p></div>
+        <div class="field"><label class="lbl" for="set-bonus">Counter edge, %</label><input id="set-bonus" type="text" inputmode="decimal" value="${+(st.bonus2 * 100).toFixed(2)}"${ro}><p class="meta">A squad whose type beats its opponent's fights as if it were this much stronger. Strength is steep: 3% of strength is about +29% in damage terms, and at equal strength the countering squad won 218 of 239 logged encounters.</p></div>
         <div class="field"><label class="lbl" for="set-sigma">Hidden strength, ± %</label><input id="set-sigma" type="text" inputmode="decimal" value="${+(st.sigma2 * 100).toFixed(1)}"${ro}><p class="meta">How far a squad can still drift from its true strength, fight to fight.</p></div>
         <div class="field"><label class="lbl" for="set-sims">Simulations per matchup</label><select id="set-sims"${ro}>${[800, 1500, 3000].map((n) => `<option value="${n}"${+st.sims === n ? ' selected' : ''}>${n.toLocaleString()}</option>`).join('')}</select><p class="meta">More is steadier but slower.</p></div>
       </div>${canAdmin() ? '' : '<p class="meta">These are shared by the whole team. Only the tracker\'s owner can change them.</p>'}</section>`;
@@ -2915,7 +2961,7 @@ details[open] > summary { margin-bottom: 10px; }
     const how = `<section class="card" aria-labelledby="h-how"><div class="card-h"><h2 id="h-how">How the tracker works</h2></div><div class="prose">
       <p>Each encounter, both sides send the next squad in line. The winner goes to the back of its line with the troops it has left; the loser is out. The fight ends when one side has no squads left, so it takes 3 to 5 encounters. This rule matched every one of 391 encounters in real battle reports.</p>
       <p>Listed power is not strength. Every battle report carries each hero's full stat sheet and where the bonuses come from: research (Hero, Units, Special Forces, the Squad trees, Siege to Seize, Defense Fortifications, the three Masteries, Tactical Weapons), gear, exclusive weapons, decorations, drone and Overlord. The tracker turns that into a <b>true strength</b> for every squad. It was fitted on how many troops the winner kept in 11,259 logged encounters and checked on fights it had not seen: between squads within 8% in listed power it picks the winner about 89% of the time, against about 80% for listed power alone. Gear counts for about twice its listed power; decorations, the drone and the Overlord for less than theirs (an Overlord is worth about half).</p>
-      <p>The simulator plays all 36 pairings of your order against theirs, ${(+st.sims || 1500).toLocaleString()} times each, letting every squad drift about ${pct(+st.sigma2, 1)} from its true strength. A squad whose type beats its opponent's (Tank beats Missile, Missile beats Aircraft, Aircraft beats Tank) fights as if it were ${pct(+st.bonus2, 1)} stronger. The winner of an encounter keeps fewer troops the closer it was, and a squad that has lost half its troops still fights at about three quarters of its strength. With the orders actually played, this calls 96% of the logged fights right.</p>
+      <p>The simulator plays all 36 pairings of your order against theirs, ${(+st.sims || 1500).toLocaleString()} times each, letting every squad drift about ${pct(+st.sigma2, 1)} from its true strength. A squad whose type beats its opponent's (Tank beats Missile, Missile beats Aircraft, Aircraft beats Tank) fights as if it were ${pct(+st.bonus2, 1)} stronger. That is a big edge: when two squads of equal true strength met in the reports, the countering one won 218 of 239 times and kept about a third of its troops, and in damage terms it comes to about +29%. The winner of an encounter keeps fewer troops the closer it was, and a squad that has lost half its troops still fights at about three quarters of its strength. With the orders actually played, this calls 96% of the logged fights right.</p>
       <p>True strength is in the same units as listed power: a squad that fights like 90M does as well as a typical 90M squad in the logged fights. The very biggest accounts come out 10 to 15% below their listed power, because much of their power is decorations, drone and Overlord, which add less in a fight than they add on paper.</p>
       <p>To predict an opponent, the tracker replays their logged fights against seven habits: repeating their last order, leading with their strongest squad, countering the formation they could see, keeping a winning order and changing a losing one, second-guessing, keeping their strong squad (Overlord and best gear) away from its counter in the formation they could see, and picking at random. It learns how much of each habit that player shows. Players with only a few fights lean on how everyone in your log behaves.</p>
       <p>When you meet someone again, they know exactly what you played against them last time. The tracker adds an eighth habit for rematches: replay the order that won, or counter the order that beat them. It learns how often each player does that.</p>
