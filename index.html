@@ -92,8 +92,9 @@ table.race th .meta { text-transform: none; letter-spacing: 0; font-weight: 400;
 @media (max-width: 620px) {
   table.race th, table.race td { padding-left: 4px; padding-right: 4px; }
   table.race td:first-child { white-space: normal; overflow-wrap: anywhere; }
-  .racebar { min-width: 62px; gap: 4px; }
-  .racebar .bar { min-width: 20px; }
+  .racebar { min-width: 54px; gap: 4px; }
+  .racebar .bar { min-width: 14px; }
+  table.race th, table.race td { padding-left: 3px; padding-right: 3px; }
 }
 .st-ctl { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .st-ctl select { width: auto; flex: 0 0 auto; }
@@ -2796,11 +2797,13 @@ details[open] > summary { margin-bottom: 10px; }
       <div class="scroll"><table class="race-opps"><thead><tr><th>Opponent</th><th>Next round</th><th>Meets</th><th>Win</th></tr></thead><tbody>${oppRows}</tbody></table></div>
       <p class="foot">Pairing follows the standings: you mostly meet players from your own block of 16 places (1–16, 17–32 and so on), any of them, the place next to yours a little more often. So any single round is a guess. Meets = how many times you'd expect to face them in the next 8 rounds; Win = your chance against them.</p></section>`;
     const rows = G.p.map((p, i) => ({ p, i })).filter((o) => o.p[3] >= 0.01 || o.i < 12 || o.i === x.i).sort((a, b) => b.p[3] - a.p[3] || a.i - b.i);
+    const THPX = fullIndex().players;
+    const thpOf = (name) => { const pl = THPX[key(name)], last = pl && pl.entries.length ? pl.entries[pl.entries.length - 1] : null, v = last ? last.form.reduce((acc, q) => acc + (+q.p || 0), 0) : 0; return v ? `${Math.round(v)}M` : '–'; };
     const raceCard = `<section class="card"><div class="card-h"><h2>Group ${esc(g)} race</h2><span class="aside">top 8 advance</span></div>
-      <div class="scroll"><table class="race"><thead><tr><th>Player <span class="meta">(place now)</span></th><th>Top 8</th><th>Record</th><th>Score</th></tr></thead><tbody>
-      ${rows.map((o) => `<tr class="${o.i === x.i ? 'me' : ''}"><td><span class="meta">#${o.i + 1}</span> ${esc(short(o.p[0]))}${profTag(o.p[0], true)}</td><td><span class="racebar"><span class="bar"><i style="width:${(o.p[3] * 100).toFixed(1)}%"></i></span><span class="pct">${pct(o.p[3])}</span></span></td><td>${recOf(o.p, played)}</td><td>${scoreOf(o.p)}</td></tr>`).join('')}
+      <div class="scroll"><table class="race"><thead><tr><th>Player <span class="meta">(place now)</span></th><th>Top 8</th><th>Record</th><th>Score</th><th title="Total hero power: the listed power of their three squads">THP</th></tr></thead><tbody>
+      ${rows.map((o) => `<tr class="${o.i === x.i ? 'me' : ''}"><td><span class="meta">#${o.i + 1}</span> ${esc(short(o.p[0]))}${profTag(o.p[0], true)}</td><td><span class="racebar"><span class="bar"><i style="width:${(o.p[3] * 100).toFixed(1)}%"></i></span><span class="pct">${pct(o.p[3])}</span></span></td><td>${recOf(o.p, played)}</td><td>${scoreOf(o.p)}</td><td>${thpOf(o.p[0])}</td></tr>`).join('')}
       </tbody></table></div>
-      <p class="foot">${R.runs.toLocaleString()} simulated runs of the last ${left} rounds. Each fight uses both players' latest squads and troops, mostly in their usual order. Pairing follows the standings in blocks of 16 places, as it did on days 1–2: in round 9, 87% of top-16 players met another top-16 player. Tested on day 2, starting from the round-8 standings: of the players it gave 75–95%, 78% made the top 8; of those it gave under 5%, none did. It expected 74 players from outside a top 16 to break into one, and 78 did. Every squad fights at its true strength, read off its stat sheet in the battle reports, so listed power is only where it starts. It assumes squads stay as they are and everyone plays every round.${rows.some((o) => estd(o.p)) ? ' ~ marks players outside the top 16: the game only shows their score from the last time they fought a top-16 player, so the rounds since are estimated and can never put them above 16th place.' : ''} Points: a loss scores 66 per enemy troop killed; a win scores 300,000 plus 66 per enemy troop killed and per troop you keep. ${PROF_KEY}</p></section>`;
+      <p class="foot">${R.runs.toLocaleString()} simulated runs of the last ${left} rounds. Each fight uses both players' latest squads and troops, mostly in their usual order. Pairing follows the standings in blocks of 16 places, as it did on days 1–2: in round 9, 87% of top-16 players met another top-16 player. Tested on day 2, starting from the round-8 standings: of the players it gave 75–95%, 78% made the top 8; of those it gave under 5%, none did. It expected 74 players from outside a top 16 to break into one, and 78 did. Every squad fights at its true strength, read off its stat sheet in the battle reports, so listed power is only where it starts. It assumes squads stay as they are and everyone plays every round.${rows.some((o) => estd(o.p)) ? ' ~ marks players outside the top 16: the game only shows their score from the last time they fought a top-16 player, so the rounds since are estimated and can never put them above 16th place.' : ''} Points: a loss scores 66 per enemy troop killed; a win scores 300,000 plus 66 per enemy troop killed and per troop you keep. THP is the listed power of a player's three squads in their latest fight; what they really fight like is the Strength column on Standings. ${PROF_KEY}</p></section>`;
     return `<div class="grid2"><div class="stack" style="gap:16px">${head}${oppCard}</div><div class="stack" style="gap:16px">${raceCard}</div></div>`;
   }
   // When no order wins: the order that scores the most points, i.e. kills the most of their troops.
