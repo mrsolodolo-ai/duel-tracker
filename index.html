@@ -81,6 +81,12 @@ table.race-opps .linkbtn, table.race .linkbtn { text-align: left; }
 table.race-opps .tag { margin-top: 3px; display: inline-block; }
 table.race-opps td:first-child .meta, table.race td { white-space: nowrap; }
 table.race th .meta { text-transform: none; letter-spacing: 0; font-weight: 400; }
+@media (max-width: 620px) {
+  table.race th, table.race td { padding-left: 4px; padding-right: 4px; }
+  table.race td:first-child { white-space: normal; overflow-wrap: anywhere; }
+  .racebar { min-width: 62px; gap: 4px; }
+  .racebar .bar { min-width: 20px; }
+}
 .st-ctl { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .st-ctl select { width: auto; flex: 0 0 auto; }
 .st-ctl input { flex: 1 1 190px; width: auto; }
@@ -98,6 +104,11 @@ table.stand .sub { display: none; }
 @media (max-width: 620px) {
   table.stand .w { display: none; }
   table.stand .sub { display: block; }
+  table.stand th, table.stand td { padding-left: 4px; padding-right: 4px; }
+  table.stand th.n, table.stand td.n { padding-right: 7px; }
+  table.stand td.who, table.stand td.who .linkbtn { overflow-wrap: anywhere; }
+  table.stand .rng { display: block; }
+  .st-ctl .seg button { padding: 6px 7px; }
 }
 .tip-list { margin: 4px 0 0; padding-left: 18px; font-size: 14px; display: flex; flex-direction: column; gap: 4px; }
 .tip-rows { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
@@ -1180,15 +1191,55 @@ details[open] > summary { margin-bottom: 10px; }
   }
 
   /* ---------- the race: simulate the remaining rounds many times ---------- */
-  // players: [{key, name, score, wins, form (slot order, last played), tr (troops, slot order)}]
-  // Pairing: players sorted by wins plus noise (sd = opt.pairNoise wins), then neighbours meet. Fitted on days 1-2:
-  // it reproduces how far apart in wins opponents were (same wins about half the time, 1 apart a third).
+  // Fights against players who are not in the data (anyone a top-16 player has never met). Measured on day 2 from
+  // rounds whose totals are known exactly (a snapshot of score and wins minus the logged fights before it): players
+  // under about 130M total squad power won roughly half of them, 140-150M about three in four, 150M+ about four in
+  // five; a win was worth 1.0-1.2M points and a loss about 0.4M. Those rounds lean towards wins (a player only gets
+  // drawn against the top 16 again by winning), so the strong end is set a little lower than measured.
+  function fieldModel(power) {
+    var lin = function (x, x0, y0, x1, y1) { return x <= x0 ? y0 : x >= x1 ? y1 : y0 + (y1 - y0) * (x - x0) / (x1 - x0); };
+    return { p: power <= 148 ? lin(power, 128, 0.5, 148, 0.74) : lin(power, 148, 0.74, 156, 0.78), win: Math.round(lin(power, 115, 1010000, 152, 1170000)), loss: 420000 };
+  }
+  // players: [{key, name, score, wins, form (slot order, last played), tr (troops, slot order), unk, cap, unkP, unkWin, unkLoss}]
+  // unk / cap are for players outside the official top 16: the feed only gives their score as of the last round they
+  // fought a top-16 player. `score` and `wins` hold what is known (that snapshot plus later logged fights), `unk` is how
+  // many of the rounds played so far are unknown, and `cap` is the most they can have now (the 16th place's score).
+  // Each run first fills in those unknown rounds (see catchUp below), and only then simulates the rounds still to come.
   function simulateRace(players, opt) {
     var N = players.length, R = opt.roundsLeft, runs = opt.runs || 1000, adv = opt.advance || 8, focus = opt.focus != null ? opt.focus : -1;
     var rnd = mulberry32(opt.seed || 2026), tau = opt.pairTau || 1.25;
     var cache = opt.cache || new Map(), statOpt = { n: opt.pairSims || 120, mixSims: opt.mixSims || 24, sigma: opt.sigma, bonus: opt.bonus, attr: opt.attr };
-    // Pairing: each player in random order meets a random unpaired player, weighted exp(-wins apart / tau).
-    // Fitted on day 2 (tau 1.25): reproduces how far apart in wins opponents were and how widely the leaders' opponents spread.
+    // Pairing follows the standings in blocks of 16 places. Round 9 is the one round where the exact standings before it
+    // are known for a whole top 16 (the day-1 import): 87% of the top 16 met another top-16 player, any distance apart
+    // inside the 16 (place 1 met places 10-15 in 6 of 16 groups), with next-door places about 4 times as likely as the
+    // rest. So: going down the standings, each unpaired player draws an unpaired player from the same block of 16
+    // (weight 1, `adj` if next in line); with a small total weight `leak` the opponent comes from a lower block, mostly
+    // the next one. Nobody meets the same opponent two rounds running: of 317 rematches in the log, none came the very
+    // next round (players[i].lastOpp = index of their latest opponent). (Before this the simulation paired by wins,
+    // which sent the top 16 against outsiders about half the time; opt.pairing = 'wins' keeps that rule for comparison.)
+    var BLK = opt.block || 16, ADJ = opt.adj != null ? opt.adj : 4, LEAK = opt.leak != null ? opt.leak : 2.5, LDEC = opt.leakDecay != null ? opt.leakDecay : 0.35;
+    var byWins = opt.pairing === 'wins', ordS = [], usedB = new Uint8Array(N), wB = new Float64Array(N), lastO = new Int32Array(N);
+    var LPOW = []; for (var bd = 0; bd < 64; bd++) LPOW.push(Math.pow(LDEC, bd));
+    function pairBlocks(scv) {
+      var q, j, out = [];
+      ordS.length = 0; for (q = 0; q < N; q++) { ordS.push(q); usedB[q] = 0; }
+      ordS.sort(function (x, y) { return scv[y] - scv[x]; });
+      for (q = 0; q < N; q++) {
+        if (usedB[q]) continue;
+        usedB[q] = 1;
+        var blk = Math.floor(q / BLK), end = Math.min(N, (blk + 1) * BLK), inTot = 0, x, pick = -1, lo = lastO[ordS[q]];
+        for (j = q + 1; j < end; j++) if (!usedB[j] && ordS[j] !== lo) inTot += j === q + 1 ? ADJ : 1;
+        if (inTot <= 0 || rnd() < LEAK / (LEAK + inTot)) { // a lower block (or nobody left in this one)
+          var outTot = 0;
+          for (j = end; j < N; j++) { if (usedB[j] || ordS[j] === lo) { wB[j] = 0; continue; } wB[j] = LPOW[Math.floor(j / BLK) - blk - 1]; outTot += wB[j]; }
+          if (outTot > 0) { x = rnd() * outTot; for (j = end; j < N; j++) if (wB[j] > 0) { x -= wB[j]; pick = j; if (x <= 0) break; } }
+        }
+        if (pick < 0 && inTot > 0) { x = rnd() * inTot; for (j = q + 1; j < end; j++) if (!usedB[j] && ordS[j] !== lo) { x -= j === q + 1 ? ADJ : 1; pick = j; if (x <= 0) break; } }
+        if (pick < 0) continue; // odd one out sits the round out
+        usedB[pick] = 1; out.push(ordS[q], ordS[pick]);
+      }
+      return out;
+    }
     var K = []; for (var d = 0; d <= 64; d++) K.push(Math.exp(-d / tau));
     var bucket = [], posIn = new Int32Array(N);
     function pairRound(wn) {
@@ -1229,24 +1280,81 @@ details[open] > summary { margin-bottom: 10px; }
     var wPts = new Float64Array(N), wCnt = new Float64Array(N), lPts = new Float64Array(N), lCnt = new Float64Array(N);
     var rankHist = new Float64Array(N + 1), cutScores = [];
     var sc = new Float64Array(N), wn = new Float64Array(N), idx = [], form = new Float64Array(N), g = gaussFrom(rnd), formSd = opt.formSd != null ? opt.formSd : 1.0;
+    // ---- catch-up: unknown past rounds of players outside the official top 16 ----
+    // Those rounds were not against a top-16 player (all of those fights are logged). Each one is a win with the
+    // player's own chance `unkP` (from their record in such rounds, see build_race.js) shifted by this run's form, worth
+    // `unkWin` points, or else a loss worth `unkLoss`. A player known to be outside the top 16 cannot be above the 16th
+    // place's score (`cap`): a run that puts them above it is retried with a new form (so "must have done worse" also
+    // lowers how strong they are for the rest of that run), and after a few tries wins are turned into losses until it fits.
+    var rem0 = new Int32Array(N), capv = new Float64Array(N), isOut = new Uint8Array(N), outs = [], capTries = opt.capTries != null ? opt.capTries : 6;
+    var catchSum = new Float64Array(N), catchSq = new Float64Array(N), catchWins = new Float64Array(N), catchWSq = new Float64Array(N), capHits = new Float64Array(N), formSum = new Float64Array(N);
+    // Optional (opt.field): when two players from outside the top 16 are drawn together, each is taken to meet someone
+    // who is not in the data instead, with the same chance and points as in the catch-up.
+    var field = opt.field === true; // only with opt.pairing = 'wins'; with blocks, neighbours in the standings really do meet
+    function fieldFight(x) {
+      var P4 = players[x];
+      if (rnd() < 1 / (1 + Math.exp(-(lg(P4.unkP != null ? P4.unkP : 0.6) + form[x])))) { sc[x] += P4.unkWin || 1080000; wn[x]++; }
+      else sc[x] += P4.unkLoss || 400000;
+    }
+    function catchUp() {
+      for (var q3 = 0; q3 < outs.length; q3++) {
+        var i3 = outs[q3], P3 = players[i3], n3 = rem0[i3], s3 = P3.score, w3 = P3.wins, nd = 0;
+        if (n3 > 0) {
+          var base = lg(P3.unkP != null ? P3.unkP : 0.6), wp = P3.unkWin || 1080000, lp = P3.unkLoss || 400000, tries = 0, k3;
+          for (;;) {
+            var pw = 1 / (1 + Math.exp(-(base + form[i3])));
+            s3 = P3.score; w3 = P3.wins; nd = 0;
+            for (k3 = 0; k3 < n3; k3++) { if (rnd() < pw) { s3 += wp; w3++; nd++; } else s3 += lp; }
+            if (s3 <= capv[i3] || ++tries > capTries) break;
+            form[i3] = formSd * g();
+          }
+          if (s3 > capv[i3]) { capHits[i3]++; while (s3 > capv[i3] && nd > 0) { s3 -= wp - lp; w3--; nd--; } }
+        }
+        if (s3 > capv[i3]) s3 = capv[i3];
+        sc[i3] = s3; wn[i3] = w3;
+        catchSum[i3] += s3; catchSq[i3] += s3 * s3; catchWins[i3] += w3; catchWSq[i3] += w3 * w3; formSum[i3] += form[i3];
+      }
+    }
     // Each run, every player gets a form factor that lasts the whole run: on day 2, results spread twice as wide as
     // independent fights would (hidden strength, lineup changes). A logit sd of 1.0 reproduced that spread.
     var lg = function (p) { p = Math.min(0.997, Math.max(0.003, p)); return Math.log(p / (1 - p)); };
-    for (var i = 0; i < N; i++) idx.push(i);
+    for (var i = 0; i < N; i++) {
+      idx.push(i); rem0[i] = players[i].unk | 0;
+      capv[i] = players[i].cap != null ? players[i].cap : Infinity; isOut[i] = players[i].cap != null || rem0[i] > 0 ? 1 : 0; if (isOut[i]) outs.push(i);
+    }
+    // optional bookkeeping for tests: fights of a marked set of players (opt.track: 1 per marked player), by round
+    var trk = opt.track || null, mixTT = new Float64Array(R + 1), mixTO = new Float64Array(R + 1), mixTOw = new Float64Array(R + 1);
+    var adv2 = opt.advance2 || 0, top2 = new Float64Array(N);
+    // opt.keepTop: remember who finished in the top `advance` in every run, and with what score (for seeding across groups)
+    var keep = opt.keepTop ? { who: new Int16Array(runs * adv), score: new Float64Array(runs * adv) } : null;
+    var runTT = trk ? new Uint8Array(N * Math.max(1, R)) : null, runTO = trk ? new Uint8Array(N * Math.max(1, R)) : null, survTT = new Float64Array(R + 1), survTO = new Float64Array(R + 1);
     for (var run = 0; run < runs; run++) {
-      for (i = 0; i < N; i++) { sc[i] = players[i].score; wn[i] = players[i].wins; form[i] = formSd * g(); }
+      for (i = 0; i < N; i++) { sc[i] = players[i].score; wn[i] = players[i].wins; form[i] = formSd * g(); lastO[i] = players[i].lastOpp != null ? players[i].lastOpp : -1; }
+      if (outs.length) catchUp();
       for (var r = 0; r < R; r++) {
-        var ord = pairRound(wn);
+        var ord = byWins ? pairRound(wn) : pairBlocks(sc);
         for (var m = 0; m + 1 < ord.length; m += 2) {
-          var a = ord[m], b = ord[m + 1], s = stat(a, b), aw = rnd() < 1 / (1 + Math.exp(-(lg(s.p) + form[a] - form[b])));
+          var a = ord[m], b = ord[m + 1];
+          lastO[a] = b; lastO[b] = a;
+          if (field && isOut[a] && isOut[b]) { fieldFight(a); fieldFight(b); continue; } // both meet players outside the data
+          var s = stat(a, b), aw = rnd() < 1 / (1 + Math.exp(-(lg(s.p) + form[a] - form[b])));
           if (a === focus || b === focus) { var o = a === focus ? b : a; if (r === 0) meetNext[o]++; if (r < (opt.dayRounds || 8)) meetDay[o]++; }
           if (all) { if (r === 0) { MN[a * N + b]++; MN[b * N + a]++; } if (r < (opt.dayRounds || 8)) { MD[a * N + b]++; MD[b * N + a]++; } }
+          if (trk && (trk[a] || trk[b])) {
+            if (trk[a] && trk[b]) { mixTT[r]++; runTT[a * R + r] = 1; runTT[b * R + r] = 1; }
+            else { mixTO[r]++; if (trk[a] ? aw : !aw) mixTOw[r]++; runTO[(trk[a] ? a : b) * R + r] = 1; }
+          }
           if (aw) { sc[a] += s.a1; sc[b] += s.b1; wn[a]++; wPts[a] += s.a1; wCnt[a]++; lPts[b] += s.b1; lCnt[b]++; }
           else { sc[a] += s.a0; sc[b] += s.b0; wn[b]++; wPts[b] += s.b0; wCnt[b]++; lPts[a] += s.a0; lCnt[a]++; }
         }
       }
       var fin = idx.slice().sort(function (a, b) { return sc[b] - sc[a]; });
-      for (var t = 0; t < adv && t < N; t++) top[fin[t]]++;
+      for (var t = 0; t < adv && t < N; t++) { top[fin[t]]++; if (keep) { keep.who[run * adv + t] = fin[t]; keep.score[run * adv + t] = sc[fin[t]]; } }
+      for (t = 0; t < adv2 && t < N; t++) top2[fin[t]]++;
+      if (trk) { // tracked players who end inside the top `advance2`: their fights against other tracked players, by round
+        for (t = 0; t < adv2 && t < N; t++) if (trk[fin[t]]) for (var r5 = 0; r5 < R; r5++) { survTT[r5] += runTT[fin[t] * R + r5]; survTO[r5] += runTO[fin[t] * R + r5]; }
+        runTT.fill(0); runTO.fill(0);
+      }
       if (focus >= 0) rankHist[fin.indexOf(focus) + 1]++;
       cutScores.push(sc[fin[adv - 1]]);
       for (i = 0; i < N; i++) sumScore[i] += sc[i];
@@ -1259,7 +1367,16 @@ details[open] > summary { margin-bottom: 10px; }
       meetDay: Array.prototype.map.call(meetDay, function (v) { return v / runs; }),
       rankHist: Array.prototype.map.call(rankHist, function (v) { return v / runs; }),
       cut: { p10: cutScores[Math.floor(0.1 * runs)], p50: cutScores[Math.floor(0.5 * runs)], p90: cutScores[Math.floor(0.9 * runs)] },
-      meetNextAll: MN, meetDayAll: MD, runs: runs,
+      meetNextAll: MN, meetDayAll: MD, runs: runs, finalTop: keep,
+      // players outside the top 16: average score and wins now (after the unknown rounds and the cap), and how often the cap applied
+      top2: Array.prototype.map.call(top2, function (v) { return v / runs; }),
+      mix: { tt: Array.prototype.slice.call(mixTT), to: Array.prototype.slice.call(mixTO), tow: Array.prototype.slice.call(mixTOw), survTT: Array.prototype.slice.call(survTT), survTO: Array.prototype.slice.call(survTO) },
+      formAvg: Array.prototype.map.call(formSum, function (v, k) { return isOut[k] ? v / runs : 0; }),
+      nowScore: Array.prototype.map.call(catchSum, function (v, k) { return isOut[k] ? v / runs : players[k].score; }),
+      nowWins: Array.prototype.map.call(catchWins, function (v, k) { return isOut[k] ? v / runs : players[k].wins; }),
+      nowScoreSd: Array.prototype.map.call(catchSq, function (v, k) { return isOut[k] ? Math.sqrt(Math.max(0, v / runs - Math.pow(catchSum[k] / runs, 2))) : 0; }),
+      nowWinsSd: Array.prototype.map.call(catchWSq, function (v, k) { return isOut[k] ? Math.sqrt(Math.max(0, v / runs - Math.pow(catchWins[k] / runs, 2))) : 0; }),
+      capRate: Array.prototype.map.call(capHits, function (v) { return v / runs; }),
       winPts: Array.prototype.map.call(wPts, function (v, k) { return wCnt[k] ? v / wCnt[k] : 0; }),
       lossPts: Array.prototype.map.call(lPts, function (v, k) { return lCnt[k] ? v / lCnt[k] : 0; }),
       stat: stat, pairs: cache.size
@@ -1267,7 +1384,7 @@ details[open] > summary { margin-bottom: 10px; }
   }
 
   var E = null;
-  var api = { PER_TROOP: PER_TROOP, WIN_BONUS: WIN_BONUS, troopsOf: troopsOf, troopsFor: troopsFor, fightPts: fightPts, pairStats: pairStats, matchStats: matchStats, pointsMatrix: pointsMatrix, simulateRace: simulateRace,
+  var api = { PER_TROOP: PER_TROOP, WIN_BONUS: WIN_BONUS, fieldModel: fieldModel, troopsOf: troopsOf, troopsFor: troopsFor, fightPts: fightPts, pairStats: pairStats, matchStats: matchStats, pointsMatrix: pointsMatrix, simulateRace: simulateRace,
     use: function (engine) { E = engine; return api; } };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else { root.DuelRace = api; if (root.DuelEngine) E = root.DuelEngine; }
@@ -1970,7 +2087,7 @@ details[open] > summary { margin-bottom: 10px; }
     if (met.length) { const last = met[met.length - 1]; facts.push({ t: `Rematch: you ${last.won ? 'lost' : 'won'} round ${last.round}`, hot: true }); }
     const orx = raceOf(pl.name);
     if (orx) facts.push({ t: `Top 8 chance ${pct(orx.r[3])}`, hot: false });
-    facts.push({ t: orx ? `${orx.r[2]}–${S.race.round - orx.r[2]} record` : `${wins}–${n - wins} record`, hot: false });
+    facts.push({ t: orx ? `${recOf(orx.r, S.race.round)} record` : `${wins}–${n - wins} record`, hot: false });
     return `<div class="facts" role="list" aria-label="Key facts">${facts.map((f) => `<span role="listitem" class="fact${f.hot ? ' hot' : ''}">${esc(f.t)}</span>`).join('')}</div>`;
   }
   // The opponent's main type, Overlord and mythic gear, and what changes if they move their Overlord.
@@ -2447,6 +2564,10 @@ details[open] > summary { margin-bottom: 10px; }
   }
   const fmtK = (k) => `${(k / 1000).toFixed(1)}M`; // thousands of points
   const fmtS = (v) => `${(v / 1e6).toFixed(2)}M`; // points
+  // Outside a group's top 16 the game shows no current score: r[8] counts the rounds that had to be estimated.
+  const estd = (r) => !!r[8];
+  const recOf = (r, played) => { const w = Math.round(r[2]); return `${estd(r) ? '~' : ''}${w}–${played - w}`; };
+  const scoreOf = (r) => `${estd(r) ? '~' : ''}${fmtS(r[1])}`;
   // Wins needed to reach the likely 8th-place finish, at this player's simulated points per win and per loss.
   function winsNeeded(x) {
     const left = S.race.rounds - S.race.round, need = x.G.cut[1] * 1000 - x.r[1];
@@ -2470,28 +2591,28 @@ details[open] > summary { margin-bottom: 10px; }
     else if (chance < 0.01) verdict = `On current squad strength the top 8 is out of reach: 8th place is likely to finish around ${cut}, and your simulated finish averages ${fmtK(r[4])}. Every point still counts for your final place, so play for kills in fights you can't win.`;
     else {
       const w = winsNeeded(x);
-      verdict = `8th place is likely to finish around ${cut}. From ${fmtS(r[1])} that takes about <b>${Math.min(w, left)} wins in your last ${left} fights</b>${w > left ? ' and some luck' : ''}. A win is worth about ${fmtK(r[5] || 1080)} to you, a loss about ${fmtK(r[6] || 330)}.`;
+      verdict = `8th place is likely to finish around ${cut}. From ${scoreOf(r)} that takes about <b>${Math.min(w, left)} wins in your last ${left} fights</b>${w > left ? ' and some luck' : ''}. A win is worth about ${fmtK(r[5] || 1080)} to you, a loss about ${fmtK(r[6] || 330)}.`;
     }
     const head = `<section class="card">${title(`group ${esc(g)} · ${asOf}`)}
       <div class="big-row"><span class="big-num">${pct(chance)}</span><span class="cap">chance ${esc(r[0])} finishes in the top 8 of group ${esc(g)}</span></div>
-      <div>${stat('Now', `#${x.i + 1} of ${G.p.length} · ${fmtS(r[1])} · ${r[2]}–${played - r[2]}`)}${stat('Rounds left', `${left}, 8 a day`)}</div>
-      <p>${verdict}</p></section>`;
+      <div>${stat('Now', `${estd(r) ? 'about ' : ''}#${x.i + 1} in the group · ${scoreOf(r)} · ${recOf(r, played)}`)}${stat('Rounds left', `${left}, 8 a day`)}</div>
+      <p>${verdict}</p>${estd(r) ? `<p class="meta">The game only shows current scores for a group's top 16. Your score here is what you had the last time you fought one of them, plus an estimate for the ${plural(r[8], 'round')} since.</p>` : ''}</section>`;
     const opps = r[7].slice().sort((a, b) => b[1] - a[1]);
     const keyN = opps.filter((o) => o[3] >= 0.35 && o[3] < 0.65).length, killN = opps.filter((o) => o[3] < 0.1).length;
     const oppRows = opps.map(([j, md, mn, pw]) => {
       const o = G.p[j], tg = raceTag(pw);
-      return `<tr class="${tg[0] === 'warn' ? 'key' : ''}"><td><button type="button" class="linkbtn" data-act="raceopp" data-name="${esc(o[0])}">${esc(short(o[0]))}</button> <span class="meta">${o[2]}–${played - o[2]}</span><div><span class="tag ${tg[0]}">${tg[1]}</span></div></td><td>${pct(mn)}</td><td>${md.toFixed(1)}</td><td><b>${pct(pw)}</b></td></tr>`;
+      return `<tr class="${tg[0] === 'warn' ? 'key' : ''}"><td><button type="button" class="linkbtn" data-act="raceopp" data-name="${esc(o[0])}">${esc(short(o[0]))}</button> <span class="meta">${recOf(o, played)}</span><div><span class="tag ${tg[0]}">${tg[1]}</span></div></td><td>${pct(mn)}</td><td>${md.toFixed(1)}</td><td><b>${pct(pw)}</b></td></tr>`;
     }).join('');
     const oppCard = `<section class="card"><div class="card-h"><h2>Next 8 rounds</h2><span class="aside">who you'll likely meet</span></div>
       <p class="meta">${keyN ? `${plural(keyN, 'key match')} (about even): these decide your top 8. ` : ''}${killN ? `${killN === 1 ? 'One of them is' : killN + ' of them are'} out of reach, so play for kills there: Next fight shows the order that kills the most. ` : ''}Tap a name for the call.</p>
       <div class="scroll"><table class="race-opps"><thead><tr><th>Opponent</th><th>Next round</th><th>Meets</th><th>Win</th></tr></thead><tbody>${oppRows}</tbody></table></div>
-      <p class="foot">Pairing goes by record with plenty of luck, so any single round is a guess. Meets = how many times you'd expect to face them in the next 8 rounds; Win = your chance against them.</p></section>`;
+      <p class="foot">Pairing follows the standings: you mostly meet players from your own block of 16 places (1–16, 17–32 and so on), any of them, the place next to yours a little more often. So any single round is a guess. Meets = how many times you'd expect to face them in the next 8 rounds; Win = your chance against them.</p></section>`;
     const rows = G.p.map((p, i) => ({ p, i })).filter((o) => o.p[3] >= 0.01 || o.i < 12 || o.i === x.i).sort((a, b) => b.p[3] - a.p[3] || a.i - b.i);
     const raceCard = `<section class="card"><div class="card-h"><h2>Group ${esc(g)} race</h2><span class="aside">top 8 advance</span></div>
       <div class="scroll"><table class="race"><thead><tr><th>Player <span class="meta">(place now)</span></th><th>Top 8</th><th>Record</th><th>Score</th></tr></thead><tbody>
-      ${rows.map((o) => `<tr class="${o.i === x.i ? 'me' : ''}"><td><span class="meta">#${o.i + 1}</span> ${esc(short(o.p[0]))}</td><td><span class="racebar"><span class="bar"><i style="width:${(o.p[3] * 100).toFixed(1)}%"></i></span><span class="pct">${pct(o.p[3])}</span></span></td><td>${o.p[2]}–${played - o.p[2]}</td><td>${fmtS(o.p[1])}</td></tr>`).join('')}
+      ${rows.map((o) => `<tr class="${o.i === x.i ? 'me' : ''}"><td><span class="meta">#${o.i + 1}</span> ${esc(short(o.p[0]))}</td><td><span class="racebar"><span class="bar"><i style="width:${(o.p[3] * 100).toFixed(1)}%"></i></span><span class="pct">${pct(o.p[3])}</span></span></td><td>${recOf(o.p, played)}</td><td>${scoreOf(o.p)}</td></tr>`).join('')}
       </tbody></table></div>
-      <p class="foot">${R.runs.toLocaleString()} simulated runs of the last ${left} rounds. Each fight uses both players' latest squads and troops, mostly in their usual order, and pairing follows records the way it did on days 1–2. Tested on day 2, starting from the round-8 standings: of the players it gave 75–95%, 84% made the top 8; of those it gave under 5%, 3% did. It assumes squads stay as they are and everyone plays every round. Points: a loss scores 66 per enemy troop killed; a win scores 300,000 plus 66 per enemy troop killed and per troop you keep.</p></section>`;
+      <p class="foot">${R.runs.toLocaleString()} simulated runs of the last ${left} rounds. Each fight uses both players' latest squads and troops, mostly in their usual order. Pairing follows the standings in blocks of 16 places, as it did on days 1–2: in round 9, 87% of top-16 players met another top-16 player. Tested on day 2, starting from the round-8 standings: of the players it gave 75–95%, 87% made the top 8; of those it gave under 5%, 2% did. It expected 78 players from outside a top 16 to break into one, and 77 did. It assumes squads stay as they are and everyone plays every round.${rows.some((o) => estd(o.p)) ? ' ~ marks players outside the top 16: the game only shows their score from the last time they fought a top-16 player, so the rounds since are estimated and can never put them above 16th place.' : ''} Points: a loss scores 66 per enemy troop killed; a win scores 300,000 plus 66 per enemy troop killed and per troop you keep.</p></section>`;
     return `<div class="grid2"><div class="stack" style="gap:16px">${head}${oppCard}</div><div class="stack" style="gap:16px">${raceCard}</div></div>`;
   }
   // When no order wins: the order that scores the most points, i.e. kills the most of their troops.
@@ -2531,18 +2652,25 @@ details[open] > summary { margin-bottom: 10px; }
   const ordinal = (n) => { const v = n % 100, sfx = ['th', 'st', 'nd', 'rd']; return n + (sfx[(v - 20) % 10] || sfx[v] || sfx[0]); };
   function standingsRows() {
     const R = S.race, P = fullIndex().players;
-    if (STC && STC.race === R && STC.k === FIK) return STC.rows;
-    const top = R.top || 16, adv = R.advance || 8, rows = [];
-    Object.keys(R.groups).sort().forEach((g) => R.groups[g].p.slice(0, top).forEach((r, i) => {
+    if (STC && STC.race === R && STC.k === FIK) return STC;
+    const top = R.top || 16, adv = R.advance || 8, rows = [], proj = [];
+    const row = (g, r, i) => {
       const pl = P[key(r[0])], last = pl && pl.entries.length ? pl.entries[pl.entries.length - 1] : null;
-      rows.push({ g, gi: i, r, name: r[0], k: key(r[0]), score: r[1], wins: r[2], al: pl && pl.al ? String(pl.al) : '',
-        power: last ? last.form.reduce((acc, q) => acc + (+q.p || 0), 0) : null, adv: i < adv });
+      return { g, gi: i, r, name: r[0], k: key(r[0]), score: r[1], wins: Math.round(r[2]), est: !!r[8], al: pl && pl.al ? String(pl.al) : '',
+        power: last ? last.form.reduce((acc, q) => acc + (+q.p || 0), 0) : null, adv: i < adv, listed: i < top };
+    };
+    Object.keys(R.groups).sort().forEach((g) => R.groups[g].p.forEach((r, i) => {
+      if (i >= top && !r[9]) return;
+      const x = row(g, r, i);
+      if (i < top) rows.push(x);
+      if (r[9]) proj.push(x); // anyone with a real chance of the top 8 has a likely seed, also from outside the top 16
     }));
     rows.sort((a, b) => b.score - a.score || (a.g < b.g ? -1 : a.g > b.g ? 1 : a.gi - b.gi));
     let seed = 0;
     rows.forEach((x, n) => { x.place = n + 1; x.seed = x.adv ? ++seed : null; });
-    STC = { race: R, k: FIK, rows };
-    return rows;
+    proj.sort((a, b) => a.r[9][1] - b.r[9][1] || b.r[3] - a.r[3] || b.score - a.score);
+    STC = { race: R, k: FIK, rows, proj };
+    return STC;
   }
   function viewStandings() {
     loadRace();
@@ -2550,58 +2678,73 @@ details[open] > summary { margin-bottom: 10px; }
     const title = (h, aside) => `<div class="card-h"><h2>${h}</h2>${aside ? `<span class="aside">${aside}</span>` : ''}</div>`;
     if (st !== 'ok') return `<section class="card">${title('Standings')}<div class="empty">${st === 'none' ? "Standings aren't available right now." : 'Loading the standings…'}</div></section>`;
     const R = S.race, adv = R.advance || 8, top = R.top || 16, played = R.round, asOf = `after round ${played} of ${R.rounds}`;
-    const all = standingsRows(), groups = Object.keys(R.groups).sort(), seeds = all.filter((x) => x.adv);
-    const scope = S.stScope === 'all' ? 'all' : 'seed', grp = groups.indexOf(S.stGroup) >= 0 ? S.stGroup : '', find = (S.stFind || '').trim().toLowerCase();
-    const meK = key(settings().me || ''), mine = meK ? all.find((x) => x.k === meK) : null;
+    const C = standingsRows(), all = C.rows, groups = Object.keys(R.groups).sort(), seeds = all.filter((x) => x.adv);
+    const hasProj = C.proj.length > 0; // likely seeds, once the simulation carries them
+    const scope = S.stScope === 'all' ? 'all' : S.stScope === 'proj' && hasProj ? 'proj' : 'seed';
+    const grp = groups.indexOf(S.stGroup) >= 0 ? S.stGroup : '', find = (S.stFind || '').trim().toLowerCase();
+    const meK = key(settings().me || ''), mine = meK ? all.find((x) => x.k === meK) || C.proj.find((x) => x.k === meK) : null;
     const team = teamAlliance(), extra = new Set(EXTRA_MATES.map(key));
-    const proj = all.some((x) => x.r[9]); // projected seeds, once the simulation carries them
-    const rec = (x) => `${x.wins}–${played - x.wins}`;
-    const gap = (v) => `${(Math.abs(v) / 1e6).toFixed(2)}M`;
+    const rec = (x) => `${x.est ? '~' : ''}${x.wins}–${played - x.wins}`;
+    const pts = (x) => `${x.est ? '~' : ''}${fmtS(x.score)}`;
+    const gap = (v) => (Math.abs(v) < 95000 ? `${Math.max(1, Math.round(Math.abs(v) / 1000))}K` : `${(Math.abs(v) / 1e6).toFixed(2)}M`);
+    const chance = (x) => (x.r[3] >= 0.995 ? '99%+' : x.r[3] < 0.005 ? '<1%' : pct(x.r[3]));
+    const range = (x) => (x.r[9] ? (x.r[9][0] === x.r[9][2] ? `${x.r[9][0]}` : `${x.r[9][0]}–${x.r[9][2]}`) : '');
 
     // Your seed
     let head = '';
-    if (mine && mine.adv) {
-      const above = seeds[mine.seed - 2], below = seeds[mine.seed];
-      head = `<section class="card">${title('Your seed', asOf)}
-        <div class="big-row"><span class="big-num">#${mine.seed}</span><span class="cap">of ${seeds.length}: where ${esc(mine.name)} would be seeded for the semi-finals if the qualifier ended now</span></div>
-        <div>${stat(`Group ${esc(mine.g)}`, `${ordinal(mine.gi + 1)} · ${fmtS(mine.score)} · ${rec(mine)}`)}${above ? stat(`Seed ${above.seed}, just above`, `${esc(short(above.name))} · ${gap(above.score - mine.score)} ahead`) : ''}${below ? stat(`Seed ${below.seed}, just below`, `${esc(short(below.name))} · ${gap(mine.score - below.score)} behind`) : ''}${proj && mine.r[9] ? stat(`Likely seed after round ${R.rounds}`, `${mine.r[9][1]} (range ${mine.r[9][0]}–${mine.r[9][2]})`) : ''}</div></section>`;
-    } else if (mine) {
-      const last = all.find((x) => x.g === mine.g && x.gi === adv - 1);
-      head = `<section class="card">${title('Your seed', asOf)}
-        <p><b>${esc(mine.name)}</b> is ${ordinal(mine.gi + 1)} in group ${esc(mine.g)} with ${fmtS(mine.score)}. Only the top ${adv} of each group get a seed${last ? `: ${ordinal(adv)} place is ${esc(short(last.name))} at ${fmtS(last.score)}, ${gap(last.score - mine.score)} ahead` : ''}.</p></section>`;
+    if (mine) {
+      const likely = mine.r[9] ? stat(`Likely seed after round ${R.rounds}`, `${mine.r[9][1]}${mine.r[9][0] === mine.r[9][2] ? '' : ` (${range(mine)} in 8 runs out of 10)`}`) : '';
+      if (mine.adv) {
+        const above = seeds[mine.seed - 2], below = seeds[mine.seed];
+        head = `<section class="card">${title('Your seed', asOf)}
+          <div class="big-row"><span class="big-num">#${mine.seed}</span><span class="cap">of ${seeds.length}: where ${esc(mine.name)} would be seeded for the semi-finals if the qualifier ended now</span></div>
+          <div>${stat(`Group ${esc(mine.g)}`, `${ordinal(mine.gi + 1)} · ${pts(mine)} · ${rec(mine)}`)}${above ? stat(`Seed ${above.seed}, just above`, `${esc(short(above.name))} · ${gap(above.score - mine.score)} ahead`) : ''}${below ? stat(`Seed ${below.seed}, just below`, `${esc(short(below.name))} · ${gap(mine.score - below.score)} behind`) : ''}${likely}</div></section>`;
+      } else {
+        const last = all.find((x) => x.g === mine.g && x.gi === adv - 1);
+        head = `<section class="card">${title('Your seed', asOf)}
+          <p><b>${esc(mine.name)}</b> is ${mine.est ? 'about ' : ''}${ordinal(mine.gi + 1)} in group ${esc(mine.g)} with ${pts(mine)}. Only the top ${adv} of each group get a seed${last ? `: ${ordinal(adv)} place is ${esc(short(last.name))} at ${fmtS(last.score)}, ${gap(last.score - mine.score)} ahead` : ''}.${hasProj ? ` Chance of finishing in the top ${adv}: <b>${chance(mine)}</b>.` : ''}</p>${likely ? `<div>${likely}</div>` : ''}</section>`;
+      }
     }
 
     // The list
-    let list = all.filter((x) => (scope === 'all' || x.adv) && (!grp || x.g === grp));
+    let list = (scope === 'proj' ? C.proj : all).filter((x) => (scope !== 'seed' || x.adv) && (!grp || x.g === grp));
     if (find) list = list.filter((x) => x.name.toLowerCase().indexOf(find) >= 0 || x.al.toLowerCase().indexOf(find) >= 0);
-    const cols = 6 + (proj ? 2 : 0);
+    const cols = 6 + (hasProj ? 2 : 0);
     const body = list.map((x) => {
-      const cls = [x.k === meK ? 'me' : '', (x.al && x.al === team) || extra.has(x.k) ? 'mate' : '', x.adv ? '' : 'out'].filter(Boolean).join(' ');
+      const grey = scope === 'proj' ? x.r[3] < 0.5 : !x.adv;
+      const cls = [x.k === meK ? 'me' : '', (x.al && x.al === team) || extra.has(x.k) ? 'mate' : '', grey ? 'out' : ''].filter(Boolean).join(' ');
       const cut = scope === 'all' && grp && !find && x.gi === adv ? `<tr class="cutline"><td colspan="${cols}">Top ${adv} advance</td></tr>` : '';
-      const ps = proj ? `<td>${x.r[3] >= 0.995 ? '99%+' : pct(x.r[3])}</td><td>${x.r[9] ? `${x.r[9][1]} <span class="meta">${x.r[9][0]}–${x.r[9][2]}</span>` : '<span class="meta">–</span>'}</td>` : '';
-      return `${cut}<tr class="${cls}"><td class="n">${scope === 'seed' ? x.seed : x.place}</td>
-        <td class="who"><button type="button" class="linkbtn" data-act="raceopp" data-name="${esc(x.name)}">${esc(short(x.name))}</button>${x.al ? ` <span class="meta">${esc(x.al)}</span>` : ''}<div class="meta sub">Group ${esc(x.g)} · ${ordinal(x.gi + 1)} · ${rec(x)}</div></td>
-        <td class="w">${esc(x.g)} <span class="meta">${ordinal(x.gi + 1)}</span></td><td class="w">${rec(x)}</td><td>${fmtS(x.score)}</td>${ps}<td class="w">${x.power ? x.power.toFixed(0) + 'M' : '–'}</td></tr>`;
+      const first = scope === 'seed' ? x.seed : scope === 'proj' ? x.r[9][1] : x.place;
+      const ps = !hasProj ? '' : `<td>${chance(x)}</td><td>${scope === 'proj' ? range(x) : x.r[9] ? `${x.r[9][1]} <span class="meta rng">${range(x)}</span>` : '<span class="meta">–</span>'}</td>`;
+      const where = `${x.est ? '~' : ''}${ordinal(x.gi + 1)}`;
+      return `${cut}<tr class="${cls}"><td class="n">${first}</td>
+        <td class="who"><button type="button" class="linkbtn" data-act="raceopp" data-name="${esc(x.name)}">${esc(short(x.name))}</button>${x.al ? ` <span class="meta">${esc(x.al)}</span>` : ''}<div class="meta sub">${esc(x.g)} ${where} · ${rec(x)} · ${pts(x)}</div></td>
+        <td class="w">${esc(x.g)} <span class="meta">${where}</span></td><td class="w">${rec(x)}</td><td class="${hasProj ? 'w' : ''}">${pts(x)}</td>${ps}<td class="w">${x.power ? x.power.toFixed(0) + 'M' : '–'}</td></tr>`;
     }).join('');
     const what = scope === 'seed'
       ? `The top ${adv} of each group advance: ${seeds.length} players in all. Their seed is their place by total score among those ${seeds.length}.`
-      : `Each group's top ${top}, ranked by total score across all groups. Players outside their group's top ${adv} are greyed out.`;
+      : scope === 'proj'
+        ? `Where each player is likely to be seeded once all ${R.rounds} rounds are played, from the simulated last ${R.rounds - played} rounds. Players more likely to miss the top ${adv} than make it are greyed out.`
+        : `Each group's top ${top}, ranked by total score across all groups. Players outside their group's top ${adv} are greyed out.`;
     const ctl = `<div class="st-ctl">
         <div class="seg" role="group" aria-label="Players shown">
-          <button type="button" data-act="stscope" data-v="seed" aria-pressed="${scope === 'seed'}">Semi-final seeds</button>
+          <button type="button" data-act="stscope" data-v="seed" aria-pressed="${scope === 'seed'}">Seeds today</button>${hasProj ? `
+          <button type="button" data-act="stscope" data-v="proj" aria-pressed="${scope === 'proj'}">Likely seeds</button>` : ''}
           <button type="button" data-act="stscope" data-v="all" aria-pressed="${scope === 'all'}">All top ${top}s</button>
         </div>
         <select id="st-group" aria-label="Group"><option value="">All groups</option>${groups.map((g) => `<option value="${esc(g)}"${g === grp ? ' selected' : ''}>Group ${esc(g)}</option>`).join('')}</select>
         <input id="st-find" type="text" autocomplete="off" spellcheck="false" aria-label="Find a player or alliance" placeholder="Player or alliance" value="${esc(S.stFind || '')}">
       </div>`;
+    const head2 = scope === 'proj' ? ['Seed', `Top ${adv}`, 'Range'] : [scope === 'seed' ? 'Seed' : '#', `Top ${adv}`, 'Likely seed'];
     const table = list.length
-      ? `<div class="scroll"><table class="stand"><thead><tr><th class="n">${scope === 'seed' ? 'Seed' : '#'}</th><th>Player</th><th class="w">Group</th><th class="w">Record</th><th>Score</th>${proj ? `<th>Top ${adv}</th><th>Likely seed</th>` : ''}<th class="w">Power</th></tr></thead><tbody>${body}</tbody></table></div>`
-      : `<div class="empty">No player matches “${esc((S.stFind || '').trim())}”${grp ? ` in group ${esc(grp)}` : ''}.</div>`;
-    const card = `<section class="card">${title(scope === 'seed' ? 'Semi-final seeding' : 'Overall standings', `${grp ? `group ${esc(grp)} · ` : ''}${asOf}`)}
+      ? `<div class="scroll"><table class="stand"><thead><tr><th class="n">${head2[0]}</th><th>Player</th><th class="w">Group</th><th class="w">Record</th><th class="${hasProj ? 'w' : ''}">Score</th>${hasProj ? `<th>${head2[1]}</th><th>${head2[2]}</th>` : ''}<th class="w">Power</th></tr></thead><tbody>${body}</tbody></table></div>`
+      : `<div class="empty">${find ? `No player matches “${esc((S.stFind || '').trim())}”${grp ? ` in group ${esc(grp)}` : ''}.` : 'Nobody to show here.'}</div>`;
+    const foot = `The game only publishes current scores for each group's top ${top}, so those are the players with exact numbers. Seeds today show where things stand now and will move every round until round ${R.rounds}.${hasProj ? ` Top ${adv} is the chance of finishing in the group's top ${adv}. Likely seed is the middle result of ${R.runs.toLocaleString()} simulated runs of the last ${R.rounds - played} rounds, with the range it lands in 8 runs out of 10, counted when the player makes the top ${adv}; ~ marks a score estimated for a player outside the top ${top}.` : ''}`;
+    const card = `<section class="card">${title(scope === 'seed' ? 'Semi-final seeding today' : scope === 'proj' ? `Likely seeding after round ${R.rounds}` : 'Overall standings', `${grp ? `group ${esc(grp)} · ` : ''}${asOf}`)}
       ${ctl}
       <p class="meta">${what} Tap a name to scout that player.</p>
       ${table}
-      <p class="foot">The game only publishes current scores for each group's top ${top}, so those are the players listed. Seeds show where things stand today and will move every round until round ${R.rounds}.${proj ? ` Likely seed: the middle result of the simulated last ${R.rounds - played} rounds, with the range it lands in 8 times out of 10, counted only when the player makes the top ${adv}.` : ''}</p></section>`;
+      <p class="foot">${foot}</p></section>`;
     return `<div class="stack" style="gap:16px">${head}${card}</div>`;
   }
 
@@ -2734,7 +2877,7 @@ details[open] > summary { margin-bottom: 10px; }
     else if (a === 'dismiss') { S.note = ''; S.noteErr = false; render(); }
     else if (a === 'opp') { setOpp(el.dataset.name); S.oppOpen = false; render(); }
     else if (a === 'raceopp') { setOpp(el.dataset.name); S.oppOpen = false; if (location.hash !== '#next') location.hash = 'next'; else render(); }
-    else if (a === 'stscope') { S.stScope = el.dataset.v === 'all' ? 'all' : 'seed'; render(); }
+    else if (a === 'stscope') { S.stScope = el.dataset.v; render(); }
     else if (a === 'oedit') { S.oppOpen = !S.oppOpen; render(); }
     else if (a === 'melog') { S.personal.myForm = null; S.meDraft = null; S.shownPerm = null; S.roll = null; savePersonal(); render(); }
     else if (a === 'mehand') {
