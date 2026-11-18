@@ -2335,7 +2335,16 @@ details[open] > summary { margin-bottom: 10px; }
   function byPoints(pr, plan) {
     if (!plan || !plan.exp) return;
     pr.evBest = pr.best; // the order with the best win chance, kept for reference
-    pr.ranked = pr.ranked.slice().sort((a, b) => plan.exp[b] - plan.exp[a]);
+    // Orders a few hundred points apart are a tie as far as anyone can tell (a far stronger squad loses its handful of
+    // troops whatever it meets). Among those, prefer the order that counters more of the squads they are likely to
+    // send: 150 points per net counter, 450 at most, used for the ranking only.
+    const net = [0, 1, 2, 3, 4, 5].map((i) => { const mine = E.orderSquads(pr.myCanon, i); let s = 0;
+      for (let j = 0; j < 6; j++) { const th = E.orderSquads(pr.theirCanon, j); let c = 0;
+        for (let k = 0; k < 3; k++) c += (E.BEATS[mine[k].t] === th[k].t ? 1 : 0) - (E.BEATS[th[k].t] === mine[k].t ? 1 : 0);
+        s += pr.p[j] * c; }
+      return s; });
+    const adj = plan.exp.map((v, i) => v + 150 * net[i]);
+    pr.ranked = pr.ranked.slice().sort((a, b) => adj[b] - adj[a]);
     pr.best = pr.ranked[0]; pr.byPoints = pr.ev[pr.best] >= 0.9 ? 6 : 1;
   }
   function pointsLine(pr, plan) {
