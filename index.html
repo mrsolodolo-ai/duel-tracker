@@ -71,6 +71,14 @@ tr.best td { font-weight: 700; }
 .tip.hot { border-left-color: var(--loss); }
 .tip h3 { font-size: 15px; font-weight: 700; margin: 0; }
 .tip p { margin: 0; font-size: 14px; }
+table.sct { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+table.sct th, table.sct td { text-align: left; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.sct thead th { color: var(--muted); font-weight: 600; font-size: 12.5px; }
+table.sct tbody th { font-family: var(--body); font-weight: 500; font-size: 13.5px; letter-spacing: 0; text-transform: none; color: var(--muted); }
+table.sct tbody th .meta { font-size: 12px; }
+table.sct td { font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.sct td.up { font-weight: 700; color: var(--ink); }
+@media (max-width: 520px) { table.sct { font-size: 12.5px; } table.sct td { white-space: normal; } }
 table.race tr.me td { background: color-mix(in oklab, var(--accent) 14%, transparent); font-weight: 700; }
 table.race-opps tr.key td { background: color-mix(in oklab, var(--msl) 10%, transparent); }
 .racebar { display: flex; align-items: center; gap: 6px; min-width: 92px; }
@@ -263,7 +271,7 @@ details[open] > summary { margin-bottom: 10px; }
 @media (max-width: 820px) {
   .grid-next { display: flex; flex-direction: column; gap: 14px; align-items: stretch; }
   .grid-next .col { display: contents; }
-  .c-opp { order: 1; } .c-hero { order: 2; } .c-pred { order: 3; } .c-you { order: 4; } .c-mix { order: 5; } .c-mx { order: 6; }
+  .c-opp { order: 1; } .c-hero { order: 2; } .c-ov { order: 3; } .c-pred { order: 4; } .c-scout { order: 5; } .c-you { order: 6; } .c-mix { order: 7; } .c-mx { order: 8; }
   .grid-opp, .grid2 { grid-template-columns: minmax(0, 1fr); }
   .plist { max-height: 260px; }
   .sides { grid-template-columns: minmax(0, 1fr); }
@@ -331,10 +339,15 @@ details[open] > summary { margin-bottom: 10px; }
   var RM_PRIOR = { a: 1, b: 2 }; // weak prior: about a third of rematch choices follow the last meeting
   var DEFAULT_W = { habit: 0.40, strongest: 0.15, counter: 0.15, wsls: 0.12, double: 0.06, dodge: 0.08, random: 0.12 };
   var DEFAULTS = {
-    bonus: 0.04,     // counter edge on hero power when a squad's type beats the enemy's (fitted on 391 real encounters)
-    sigma: 0.03,     // spread of hidden strength around listed power (lognormal sd, per squad; fitted)
-    attr: 1.5,       // attrition exponent: how many troops a winner keeps (fitted on real survivor counts)
-    prof: 0.033,     // War Leader edge on squad power over an Engineer (fitted on 1,557 War Leader v Engineer fights: +3.0 to +3.5%)
+    bonus: 0.0315,   // counter edge on strength when a squad's type beats the enemy's (fitted on 11,259 fresh encounters)
+    sigma: 0.017,    // spread of hidden strength around true strength p * x (lognormal sd, per squad; fitted)
+    sigma0: 0.03,    // the same for a squad with no strength reading (typed in by hand): spread around listed power
+    attr: 1.5,       // (old rules only) attrition exponent
+    keepA: 8.0,      // an encounter's winner keeps (1 - rho^keepA)^keepB of its troops, rho = loser's strength / winner's
+    keepB: 0.86,
+    eta: 0.41,       // a squad with a share f of its troops left fights at f^eta of its strength (not f: heroes do most of the work)
+    ovValue: 0.52,   // 1M of listed Overlord power is worth this much true strength to the squad that carries it (54 clean moves)
+    prof: 0.033,     // War Leader edge on LISTED power, used only for squads without a strength reading (x already includes it)
     sims: 1500,      // simulations for the live matchup
     fitSims: 40,     // simulations per matchup when learning from history (40 matched 120 on day-2 data and builds 3x faster)
     decay: 0.5,      // how fast older formations fade from a player's habit
@@ -390,6 +403,8 @@ details[open] > summary { margin-bottom: 10px; }
     var out = arr.map(function (q) {
       var o = { t: normType(q && (q.t || q.type)), p: normPower(q && (q.p != null ? q.p : q.power)) };
       if (q && q.id != null && q.id !== '') o.id = String(q.id);
+      // x: strength multiplier from the squad's stat sheet (true strength = p * x)
+      if (q && q.x != null && isFinite(+q.x) && +q.x > 0.3 && +q.x < 3) o.x = +q.x;
       return o;
     });
     for (var i = 0; i < 3; i++) if (!isFinite(out[i].p)) return null;
@@ -416,6 +431,8 @@ details[open] > summary { margin-bottom: 10px; }
       ['T', 'A', 'M'].forEach(function (t) { if (x.tb[t] != null && isFinite(+x.tb[t])) tb[t] = +x.tb[t]; });
       if (Object.keys(tb).length) o.tb = tb;
     }
+    // Scouting details from the raw report (research, exclusive weapons, decorations, Overlord and drone level).
+    if (x.sc && typeof x.sc === 'object' && Array.isArray(x.sc.tc)) o.sc = x.sc;
     return o;
   }
   function normBattle(b) {
@@ -447,7 +464,7 @@ details[open] > summary { margin-bottom: 10px; }
       if (ti !== tj) return ti - tj;
       return (form[j].p - form[i].p) || (i - j);
     });
-    var canon = idx.map(function (i) { var q = { t: form[i].t, p: form[i].p }; if (form[i].id != null) q.id = form[i].id; return q; });
+    var canon = idx.map(function (i) { var q = { t: form[i].t, p: form[i].p }; if (form[i].id != null) q.id = form[i].id; if (form[i].x != null) q.x = form[i].x; return q; });
     var slotToCanon = [0, 0, 0];
     idx.forEach(function (slot, c) { slotToCanon[slot] = c; });
     return { canon: canon, perm: permIndex(slotToCanon) };
@@ -476,12 +493,19 @@ details[open] > summary { margin-bottom: 10px; }
   function moveOverlord(form, ex, toId) {
     if (!ex || !ex.ov || !(ex.op > 0)) return form;
     return form.map(function (q) {
-      var p = q.p - (q.id === ex.ov ? ex.op : 0) + (q.id === toId ? ex.op : 0);
+      var d = (q.id === toId ? ex.op : 0) - (q.id === ex.ov ? ex.op : 0);
+      var p = q.p + d;
       var o = { t: q.t, p: Math.round(p * 10) / 10 };
       if (q.id != null) o.id = q.id;
+      // True strength moves by about half the Overlord's listed power (DEFAULTS.ovValue).
+      if (q.x != null) o.x = d ? Math.max(0.3, (q.p * q.x + DEFAULTS.ovValue * d) / o.p) : q.x;
       return o;
     });
   }
+  // True strength of a squad: listed power times its multiplier. Without a reading: listed power, times the
+  // profession multiplier pm (a War Leader's squads count a little more).
+  function eff(q, pm) { return q.x != null ? q.p * q.x : q.p * (pm || 1); }
+  function spread(q, sigma) { return q.x != null ? sigma : Math.max(sigma, DEFAULTS.sigma0); }
   // Main troop type: the one with the highest type bonus (a stand-in for mastery research).
   function mainType(tb) {
     if (!tb) return null;
@@ -524,13 +548,21 @@ details[open] > summary { margin-bottom: 10px; }
   // squad; the winner goes to the back of its line with the troops it has left; the loser is out.
   // The fight ends when one side has no squads left (3 to 5 encounters).
   // Returns 1 if side A wins, 0 if B wins, 0.5 on a full mutual wipe.
-  function fight(PA, PB, SA, SB, mAB, mBA, k) {
+  // legacy = the rules before the strength model (strength falls in step with troops; winner keeps (1 - rho^2k)^(1/2k)).
+  function fight(PA, PB, SA, SB, mAB, mBA, k, legacy) {
     var qa = [PA[0], PA[1], PA[2]], qb = [PB[0], PB[1], PB[2]], fa = [1, 1, 1], fb = [1, 1, 1], k2 = 2 * k;
+    var KA = DEFAULTS.keepA, KB = DEFAULTS.keepB, ETA = DEFAULTS.eta;
     while (qa.length && qb.length) {
-      var a = qa.shift(), b = qb.shift();
-      var ea = SA[a] * fa[a] * mAB[a][b], eb = SB[b] * fb[b] * mBA[b][a];
-      if (ea > eb) { fa[a] *= Math.pow(1 - Math.pow(eb / ea, k2), 1 / k2); qa.push(a); }
-      else if (eb > ea) { fb[b] *= Math.pow(1 - Math.pow(ea / eb, k2), 1 / k2); qb.push(b); }
+      var a = qa.shift(), b = qb.shift(), ea, eb;
+      if (legacy) {
+        ea = SA[a] * fa[a] * mAB[a][b]; eb = SB[b] * fb[b] * mBA[b][a];
+        if (ea > eb) { fa[a] *= Math.pow(1 - Math.pow(eb / ea, k2), 1 / k2); qa.push(a); }
+        else if (eb > ea) { fb[b] *= Math.pow(1 - Math.pow(ea / eb, k2), 1 / k2); qb.push(b); }
+      } else {
+        ea = SA[a] * Math.pow(fa[a], ETA) * mAB[a][b]; eb = SB[b] * Math.pow(fb[b], ETA) * mBA[b][a];
+        if (ea > eb) { fa[a] *= Math.pow(1 - Math.pow(eb / ea, KA), KB); qa.push(a); }
+        else if (eb > ea) { fb[b] *= Math.pow(1 - Math.pow(ea / eb, KA), KB); qb.push(b); }
+      }
     }
     return qa.length ? 1 : (qb.length ? 0 : 0.5);
   }
@@ -548,18 +580,24 @@ details[open] > summary { margin-bottom: 10px; }
   // 6x6 matrix: chance side A wins when A plays order i and B plays order j (orders of the canonical lists).
   function winMatrix(A, B, opt) {
     var bonus = opt.bonus, sigma = opt.sigma, n = opt.n || opt.sims, attr = opt.attr || DEFAULTS.attr;
-    var ma = opt.ma || 1, mb = opt.mb || 1; // profession multipliers for side A and side B (profMult)
-    var key = JSON.stringify([A, B, bonus, sigma, n, attr, ma, mb]);
+    var ma = opt.ma || 1, mb = opt.mb || 1; // profession multipliers for side A and side B (profMult); only for squads without x
+    var legacy = !!opt.legacy;              // listed power and the old rules: how players themselves size up a matchup
+    var key = JSON.stringify([A, B, bonus, sigma, n, attr, ma, mb, legacy]);
     if (matCache[key]) return matCache[key];
     var z = getNoise(n, 777), t = multTables(A, B, bonus);
     var wins = new Float64Array(36), SA = new Float64Array(3), SB = new Float64Array(3);
+    var pa = [0, 0, 0], pb = [0, 0, 0], sa = [0, 0, 0], sb = [0, 0, 0], c0;
+    for (c0 = 0; c0 < 3; c0++) {
+      pa[c0] = legacy ? A[c0].p * ma : eff(A[c0], ma); pb[c0] = legacy ? B[c0].p * mb : eff(B[c0], mb);
+      sa[c0] = legacy ? sigma : spread(A[c0], sigma); sb[c0] = legacy ? sigma : spread(B[c0], sigma);
+    }
     for (var s = 0; s < n; s++) {
       var off = s * 6;
       for (var c = 0; c < 3; c++) {
-        SA[c] = A[c].p * ma * Math.exp(sigma * z[off + c]);
-        SB[c] = B[c].p * mb * Math.exp(sigma * z[off + 3 + c]);
+        SA[c] = pa[c] * Math.exp(sa[c] * z[off + c]);
+        SB[c] = pb[c] * Math.exp(sb[c] * z[off + 3 + c]);
       }
-      for (var i = 0; i < 6; i++) for (var j = 0; j < 6; j++) wins[i * 6 + j] += fight(PERMS[i], PERMS[j], SA, SB, t.mAB, t.mBA, attr);
+      for (var i = 0; i < 6; i++) for (var j = 0; j < 6; j++) wins[i * 6 + j] += fight(PERMS[i], PERMS[j], SA, SB, t.mAB, t.mBA, attr, legacy);
     }
     var M = [];
     for (var i2 = 0; i2 < 6; i2++) { var row = []; for (var j2 = 0; j2 < 6; j2++) row.push(wins[i2 * 6 + j2] / n); M.push(row); }
@@ -577,7 +615,7 @@ details[open] > summary { margin-bottom: 10px; }
     var z = getNoise(n, 4242), t = multTables(A, B, bonus), SA = new Float64Array(3), SB = new Float64Array(3), w = 0;
     for (var s = 0; s < n; s++) {
       var off = s * 6;
-      for (var c = 0; c < 3; c++) { SA[c] = A[c].p * Math.exp(sigma * z[off + c]); SB[c] = B[c].p * Math.exp(sigma * z[off + 3 + c]); }
+      for (var c = 0; c < 3; c++) { SA[c] = eff(A[c]) * Math.exp(spread(A[c], sigma) * z[off + c]); SB[c] = eff(B[c]) * Math.exp(spread(B[c], sigma) * z[off + 3 + c]); }
       w += fight(PERMS[ka], PERMS[kb], SA, SB, t.mAB, t.mBA, attr || DEFAULTS.attr);
     }
     return w / n;
@@ -733,6 +771,7 @@ details[open] > summary { margin-bottom: 10px; }
         if (me.al) P.al = me.al;
         if (me.sv != null) P.sv = me.sv;
         if (me.pf) P.pf = me.pf;
+        if (me.sc) P.sc = me.sc;
         players[k].entries.push({ round: b.round, form: me.s, oppKey: keyOf(op.name), oppName: op.name, oppForm: op.s, won: b.win === side, battleId: b.id, ex: extrasOf(me), oppEx: extrasOf(op), enc: b.e || null, side: side });
       });
     });
@@ -749,13 +788,14 @@ details[open] > summary { margin-bottom: 10px; }
     var c = canonical(fallbackForm);
     return { canon: c.canon, habit: onehot(c.perm), proxy: true, lastForm: fallbackForm };
   }
+  var LEGACY = { bonus: 0.04, sigma: 0.03, attr: 1.5 }; // what the order-prediction model was fitted with
   function makeObs(index, pl, t, opt) {
     var e = pl.entries[t], c = canonical(e.form);
     var prev = pl.entries.filter(function (x) { return x.round < e.round; });
     var prevPerms = prev.map(function (x) { return matchPerm(x.form, c.canon); });
     var lastResult = prev.length ? (prev[prev.length - 1].won ? 'W' : 'L') : null;
     var seen = seenOf(index, e.oppKey, e.round, e.oppForm, opt.decay);
-    var W = winMatrix(c.canon, seen.canon, { bonus: opt.bonus, sigma: opt.sigma, attr: opt.attr, n: opt.fitSims });
+    var W = winMatrix(c.canon, seen.canon, { bonus: LEGACY.bonus, sigma: LEGACY.sigma, attr: LEGACY.attr, n: opt.fitSims, legacy: true });
     var pex = null;
     for (var q = prev.length - 1; q >= 0; q--) if (prev[q].ex) { pex = prev[q]; break; }
     var strong = pex ? strongOf(c.canon, pex.ex, pex.form) : strongOf(c.canon, e.ex, e.form);
@@ -890,7 +930,10 @@ details[open] > summary { margin-bottom: 10px; }
 
     // professions: theirs from their fights (or q.oppPf), yours from your fights (or q.myPf)
     var pfOpp = q.oppPf || (pl && pl.pf) || '', pfMe = q.myPf || (mine && mine.pf) || '';
-    var W = winMatrix(c.canon, mc.canon, { bonus: opt.bonus, sigma: opt.sigma, attr: opt.attr, n: q.sims || opt.sims, ma: profMult(pfOpp, opt.prof), mb: profMult(pfMe, opt.prof) }); // their view
+    // Their view of the matchup, the way they can judge it: listed power (and profession), old rules.
+    var W = winMatrix(c.canon, mc.canon, { bonus: LEGACY.bonus, sigma: LEGACY.sigma, attr: LEGACY.attr, n: q.sims || opt.sims, ma: profMult(pfOpp, opt.prof), mb: profMult(pfMe, opt.prof), legacy: true });
+    // What actually happens: true strength.
+    var Wtrue = winMatrix(c.canon, mc.canon, { bonus: opt.bonus, sigma: opt.sigma, attr: opt.attr, n: q.sims || opt.sims, ma: profMult(pfOpp, opt.prof), mb: profMult(pfMe, opt.prof) });
     var lex = null;
     for (var q2 = entries.length - 1; q2 >= 0; q2--) if (entries[q2].ex) { lex = entries[q2]; break; }
     var d = expertDists({ canon: c.canon, prevPerms: prevPerms, lastResult: lastResult, W: W, oppHabit: myHabit, strong: lex ? strongOf(c.canon, lex.ex, lex.form) : strongestIndex(c.canon)[0], seenCanon: mc.canon }, opt);
@@ -905,7 +948,7 @@ details[open] > summary { margin-bottom: 10px; }
       rm = { round: meet.round, theirForm: meet.form, myForm: meet.oppForm, theyWon: meet.won, r: rr.r, n: rr.n, d: dRm };
       p = blend(rr.r, dRm, p);
     }
-    var Wme = flipMatrix(W); // your view: rows = your orders, cols = their orders
+    var Wme = flipMatrix(Wtrue); // your view: rows = your orders, cols = their orders
     var ev = rowEV(Wme, p);
     var worst = Wme.map(function (row) { return Math.min.apply(null, row); });
     var worstAgainst = Wme.map(function (row) { return argmax(row.map(function (v) { return -v; })); });
@@ -917,7 +960,8 @@ details[open] > summary { margin-bottom: 10px; }
       myCanon: mc.canon, shownPerm: shownPerm, myCurrentPerm: mc.perm,
       p: p, weights: w, experts: d, rematch: rm, Wme: Wme, ev: ev, worst: worst, worstAgainst: worstAgainst,
       nash: nash, ranked: ranked, best: ranked[0],
-      prof: { me: pfMe, opp: pfOpp, bonus: opt.prof != null ? opt.prof : DEFAULTS.prof }
+      prof: { me: pfMe, opp: pfOpp, bonus: opt.prof != null ? opt.prof : DEFAULTS.prof },
+      hasX: { me: mc.canon.every(function (q2) { return q2.x != null; }), opp: c.canon.every(function (q2) { return q2.x != null; }) }
     };
   }
   function sameForm(f, g) {
@@ -945,7 +989,7 @@ details[open] > summary { margin-bottom: 10px; }
         if (max.a[ia] == null) max.a[ia] = x[3];
         if (max.b[ib] == null) max.b[ib] = x[5];
         if (!(max.a[ia] > 0) || !(max.b[ib] > 0)) return;
-        rows.push({ ta: qa.t, tb: qb.t, pa: qa.p, pb: qb.p, fa: x[3] / max.a[ia], fb: x[5] / max.b[ib], aWon: x[2] === 'a',
+        rows.push({ ta: qa.t, tb: qb.t, pa: eff(qa, profMult(b.a.pf)), pb: eff(qb, profMult(b.b.pf)), fa: x[3] / max.a[ia], fb: x[5] / max.b[ib], aWon: x[2] === 'a',
           fa2: x[4] / max.a[ia], fb2: x[6] / max.b[ib] });
       });
     });
@@ -956,11 +1000,12 @@ details[open] > summary { margin-bottom: 10px; }
     var cur = { bonus: Number(settings.bonus != null ? settings.bonus : DEFAULTS.bonus), sigma: Number(settings.sigma != null ? settings.sigma : DEFAULTS.sigma), attr: Number(settings.attr || DEFAULTS.attr) };
     if (enc.length >= 30) {
       var best = null;
-      [0, 0.01, 0.02, 0.03, 0.035, 0.04, 0.05, 0.07, 0.1, 0.15, 0.2].forEach(function (bo) {
-        [0.01, 0.02, 0.03, 0.04, 0.05, 0.07, 0.1, 0.15].forEach(function (si) {
+      var ETA = DEFAULTS.eta;
+      [0, 0.01, 0.02, 0.025, 0.03, 0.0315, 0.035, 0.04, 0.05, 0.07, 0.1].forEach(function (bo) {
+        [0.01, 0.0125, 0.015, 0.017, 0.02, 0.025, 0.03, 0.04, 0.05, 0.07].forEach(function (si) {
           var ll = 0, hit = 0;
           enc.forEach(function (r) {
-            var D = Math.log(r.fa * r.pa * counterMult(r.ta, r.tb, bo)) - Math.log(r.fb * r.pb * counterMult(r.tb, r.ta, bo));
+            var D = Math.log(Math.pow(r.fa, ETA) * r.pa * counterMult(r.ta, r.tb, bo)) - Math.log(Math.pow(r.fb, ETA) * r.pb * counterMult(r.tb, r.ta, bo));
             var p = Math.min(0.999, Math.max(0.001, phi(D / (si * Math.SQRT2))));
             ll += Math.log(r.aWon ? p : 1 - p); if ((D > 0) === r.aWon) hit++;
           });
@@ -971,7 +1016,7 @@ details[open] > summary { margin-bottom: 10px; }
       [1, 1.25, 1.5, 1.75, 2, 2.5].forEach(function (k) {
         var se = 0, n = 0;
         enc.forEach(function (r) {
-          var ea = r.fa * r.pa * counterMult(r.ta, r.tb, best.bonus), eb = r.fb * r.pb * counterMult(r.tb, r.ta, best.bonus);
+          var ea = Math.pow(r.fa, ETA) * r.pa * counterMult(r.ta, r.tb, best.bonus), eb = Math.pow(r.fb, ETA) * r.pb * counterMult(r.tb, r.ta, best.bonus);
           if ((ea > eb) !== r.aWon) return;
           var rho = Math.min(0.999, r.aWon ? eb / ea : ea / eb), fw = r.aWon ? r.fa : r.fb, obs = r.aWon ? r.fa2 : r.fb2;
           se += Math.pow(fw * Math.pow(1 - Math.pow(rho, 2 * k), 1 / (2 * k)) - obs, 2); n++;
@@ -1071,7 +1116,7 @@ details[open] > summary { margin-bottom: 10px; }
     DEFAULT_W: DEFAULT_W, DEFAULTS: DEFAULTS,
     normType: normType, normPower: normPower, normSquads: normSquads, normBattle: normBattle, battleKey: battleKey, keyOf: keyOf,
     canonical: canonical, matchPerm: matchPerm, orderSquads: orderSquads, strongestIndex: strongestIndex,
-    extrasOf: extrasOf, moveOverlord: moveOverlord, mainType: mainType, bestGeared: bestGeared,
+    extrasOf: extrasOf, moveOverlord: moveOverlord, mainType: mainType, bestGeared: bestGeared, eff: eff, spread: spread, LEGACY: LEGACY,
     winMatrix: winMatrix, flipMatrix: flipMatrix, winProb: winProb, profMult: profMult, solveZeroSum: solveZeroSum,
     bestResponse: bestResponse, minResponse: minResponse, habitDist: habitDist, expertDists: expertDists, mixDists: mixDists,
     fitWeights: fitWeights, buildIndex: buildIndex, buildModel: buildModel, walkForward: walkForward, habitStats: habitStats,
@@ -1135,13 +1180,16 @@ details[open] > summary { margin-bottom: 10px; }
 
   // One fight. A and B are squads in slot order; SA/SB their real strengths this time; trA/trB their troops.
   // Returns [result for A (1 win, 0 loss, 0.5 both out), points A, points B].
+  // Rules (engine DEFAULTS, fitted on 13,568 logged encounters): a squad with a share f of its troops left fights at
+  // f^eta of its strength; the winner keeps (1 - rho^keepA)^keepB of the troops it had, rho = loser's strength / winner's.
   function fightPts(SA, SB, trA, trB, tA, tB, bonus, k) {
-    var qa = [0, 1, 2], qb = [0, 1, 2], fa = [1, 1, 1], fb = [1, 1, 1], k2 = 2 * k;
+    var qa = [0, 1, 2], qb = [0, 1, 2], fa = [1, 1, 1], fb = [1, 1, 1];
+    var KA = E.DEFAULTS.keepA, KB = E.DEFAULTS.keepB, ETA = E.DEFAULTS.eta;
     while (qa.length && qb.length) {
       var a = qa.shift(), b = qb.shift();
-      var ea = SA[a] * fa[a] * (E.BEATS[tA[a]] === tB[b] ? 1 + bonus : 1), eb = SB[b] * fb[b] * (E.BEATS[tB[b]] === tA[a] ? 1 + bonus : 1);
-      if (ea > eb) { fa[a] *= Math.pow(1 - Math.pow(eb / ea, k2), 1 / k2); fb[b] = 0; qa.push(a); }
-      else if (eb > ea) { fb[b] *= Math.pow(1 - Math.pow(ea / eb, k2), 1 / k2); fa[a] = 0; qb.push(b); }
+      var ea = SA[a] * Math.pow(fa[a], ETA) * (E.BEATS[tA[a]] === tB[b] ? 1 + bonus : 1), eb = SB[b] * Math.pow(fb[b], ETA) * (E.BEATS[tB[b]] === tA[a] ? 1 + bonus : 1);
+      if (ea > eb) { fa[a] *= Math.pow(1 - Math.pow(eb / ea, KA), KB); fb[b] = 0; qa.push(a); }
+      else if (eb > ea) { fb[b] *= Math.pow(1 - Math.pow(ea / eb, KA), KB); fa[a] = 0; qb.push(b); }
       else { fa[a] = 0; fb[b] = 0; }
     }
     var killA = 0, killB = 0, leftA = 0, leftB = 0;
@@ -1153,11 +1201,13 @@ details[open] > summary { margin-bottom: 10px; }
   // Many fights of A (slot order) against B (slot order): win chance and points given each result.
   function pairStats(A, B, trA, trB, opt) {
     var n = opt.n || 200, rnd = mulberry32(opt.seed || 12345), g = gaussFrom(rnd), sig = opt.sigma, bonus = opt.bonus, k = opt.attr || 1.5;
-    var ma = opt.ma || 1, mb = opt.mb || 1; // profession: a War Leader's squads count for a little more (engine profMult)
+    var ma = opt.ma || 1, mb = opt.mb || 1; // profession multiplier, only for squads without a strength reading (engine eff)
     var tA = A.map(function (q) { return q.t; }), tB = B.map(function (q) { return q.t; });
+    var eA = A.map(function (q) { return E.eff(q, ma); }), eB = B.map(function (q) { return E.eff(q, mb); });
+    var sA = A.map(function (q) { return E.spread(q, sig); }), sB = B.map(function (q) { return E.spread(q, sig); });
     var SA = [0, 0, 0], SB = [0, 0, 0], w = 0, a1 = 0, b1 = 0, a0 = 0, b0 = 0, nl = 0;
     for (var s = 0; s < n; s++) {
-      for (var c = 0; c < 3; c++) { SA[c] = A[c].p * ma * Math.exp(sig * g()); SB[c] = B[c].p * mb * Math.exp(sig * g()); }
+      for (var c = 0; c < 3; c++) { SA[c] = eA[c] * Math.exp(sA[c] * g()); SB[c] = eB[c] * Math.exp(sB[c] * g()); }
       var r = fightPts(SA, SB, trA, trB, tA, tB, bonus, k);
       if (r[0] >= 0.5) { w += r[0]; a1 += r[1]; b1 += r[2]; } else { nl++; a0 += r[1]; b0 += r[2]; }
     }
@@ -1173,7 +1223,7 @@ details[open] > summary { margin-bottom: 10px; }
   var KEEP = 0.78, PERM_ORDERS = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
   function matchStats(A, B, trA, trB, opt) {
     var base = pairStats(A, B, trA, trB, Object.assign({}, opt, { n: opt.n || 120 }));
-    var pa = (opt.ma || 1) * A.reduce(function (s, q) { return s + q.p; }, 0), pb = (opt.mb || 1) * B.reduce(function (s, q) { return s + q.p; }, 0);
+    var pa = A.reduce(function (s, q) { return s + E.eff(q, opt.ma || 1); }, 0), pb = B.reduce(function (s, q) { return s + E.eff(q, opt.mb || 1); }, 0);
     if (Math.max(pa, pb) / Math.min(pa, pb) > (opt.closeRatio || 1.25)) return base;
     var hw = function (k) { return k === 0 ? KEEP : (1 - KEEP) / 5; }, P = 0, A1 = 0, B1 = 0, A0 = 0, B0 = 0, W1 = 0, W0 = 0;
     for (var i = 0; i < 6; i++) for (var j = 0; j < 6; j++) {
@@ -1201,6 +1251,32 @@ details[open] > summary { margin-bottom: 10px; }
         W[i].push(st.p); PM[i].push(st.p * st.a1 + (1 - st.p) * st.a0); PT[i].push(st.p * st.b1 + (1 - st.p) * st.b0);
       }
     }
+    return { W: W, mine: PM, theirs: PT };
+  }
+  // The same 6x6, but every cell is played on the same simulated strengths, so two of your orders differ only by
+  // what the order itself changes. Use this to compare orders by points (pointsMatrix draws fresh luck per cell).
+  function ordersMatrix(myCanon, theirCanon, trMine, trTheirs, opt) {
+    var n = opt.n || 300, rnd = mulberry32(opt.seed || 4242), g = gaussFrom(rnd), sig = opt.sigma, bonus = opt.bonus;
+    var ma = opt.ma || 1, mb = opt.mb || 1, i, j, c, s2;
+    var eA = myCanon.map(function (q) { return E.eff(q, ma); }), eB = theirCanon.map(function (q) { return E.eff(q, mb); });
+    var sA = myCanon.map(function (q) { return E.spread(q, sig); }), sB = theirCanon.map(function (q) { return E.spread(q, sig); });
+    var W = [], PM = [], PT = [], zA = [0, 0, 0], zB = [0, 0, 0];
+    for (i = 0; i < 6; i++) { W.push([0, 0, 0, 0, 0, 0]); PM.push([0, 0, 0, 0, 0, 0]); PT.push([0, 0, 0, 0, 0, 0]); }
+    var SA = [0, 0, 0], SB = [0, 0, 0], tA = ['', '', ''], tB = ['', '', ''], ta = [0, 0, 0], tb = [0, 0, 0];
+    for (s2 = 0; s2 < n; s2++) {
+      for (c = 0; c < 3; c++) { zA[c] = eA[c] * Math.exp(sA[c] * g()); zB[c] = eB[c] * Math.exp(sB[c] * g()); }
+      for (j = 0; j < 6; j++) {
+        var pj = E.PERMS[j];
+        for (c = 0; c < 3; c++) { SB[c] = zB[pj[c]]; tB[c] = theirCanon[pj[c]].t; tb[c] = trTheirs[pj[c]]; }
+        for (i = 0; i < 6; i++) {
+          var pi = E.PERMS[i];
+          for (c = 0; c < 3; c++) { SA[c] = zA[pi[c]]; tA[c] = myCanon[pi[c]].t; ta[c] = trMine[pi[c]]; }
+          var r = fightPts(SA, SB, ta, tb, tA, tB, bonus);
+          W[i][j] += r[0]; PM[i][j] += r[1]; PT[i][j] += r[2];
+        }
+      }
+    }
+    for (i = 0; i < 6; i++) for (j = 0; j < 6; j++) { W[i][j] /= n; PM[i][j] /= n; PT[i][j] /= n; }
     return { W: W, mine: PM, theirs: PT };
   }
 
@@ -1399,7 +1475,7 @@ details[open] > summary { margin-bottom: 10px; }
   }
 
   var E = null;
-  var api = { PER_TROOP: PER_TROOP, WIN_BONUS: WIN_BONUS, fieldModel: fieldModel, troopsOf: troopsOf, troopsFor: troopsFor, fightPts: fightPts, pairStats: pairStats, matchStats: matchStats, pointsMatrix: pointsMatrix, simulateRace: simulateRace,
+  var api = { PER_TROOP: PER_TROOP, WIN_BONUS: WIN_BONUS, fieldModel: fieldModel, troopsOf: troopsOf, troopsFor: troopsFor, fightPts: fightPts, pairStats: pairStats, matchStats: matchStats, pointsMatrix: pointsMatrix, ordersMatrix: ordersMatrix, simulateRace: simulateRace,
     use: function (engine) { E = engine; return api; } };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else { root.DuelRace = api; if (root.DuelEngine) E = root.DuelEngine; }
@@ -1411,7 +1487,7 @@ details[open] > summary { margin-bottom: 10px; }
   'use strict';
   const E = window.DuelEngine;
   const VIEWS = ['next', 'race', 'standings', 'insights', 'opponents', 'log', 'patterns', 'setup'];
-  const DEF_SHARED = { me: 'Sammyboy99', bonus: 0.04, sigma: 0.03, attr: 1.5, sims: 1500 };
+  const DEF_SHARED = { me: 'Sammyboy99', bonus: 0.04, sigma: 0.03, attr: 1.5, sims: 1500, bonus2: 0.0315, sigma2: 0.017 }; // bonus2 / sigma2 belong to the strength model; the older bonus / sigma are no longer read
   const DEF_PERSONAL = { me: '', myForm: null };
   const LS_ME = 'lw-duel-tracker-me-v1';
   const LS = 'lw-duel-tracker-v1';
@@ -1436,7 +1512,12 @@ details[open] > summary { margin-bottom: 10px; }
   const fmtP = (p) => (!isFinite(p) ? '?' : p >= 100 ? p.toFixed(0) : p.toFixed(1));
   const key = E.keyOf;
   const blank = () => [{ t: 'T', p: '' }, { t: 'A', p: '' }, { t: 'M', p: '' }];
-  const clone = (f) => f.map((q) => (q.id != null ? { t: q.t, p: q.p, id: q.id } : { t: q.t, p: q.p }));
+  const clone = (f) => f.map((q) => { const o = { t: q.t, p: q.p }; if (q.id != null) o.id = q.id; if (q.x != null) o.x = q.x; return o; });
+  // True strength of a squad (listed power times the multiplier from its stat sheet), and a formation's total.
+  const effOf = (q) => E.eff(q, 1);
+  const effSum = (form) => form.reduce((n, q) => n + effOf(q), 0);
+  const hasX = (form) => !!form && form.some((q) => q.x != null);
+  const effLine = (form) => form.map((q) => `${TS[q.t]} ${fmtP(effOf(q))}`).join(' · ');
   const valid = (f) => (f ? E.normSquads(f) : null);
   const short = (n) => (n.length > 20 ? n.slice(0, 19) + '…' : n);
   // Profession of a player (War Leader or Engineer), read from their latest battle report.
@@ -1450,7 +1531,7 @@ details[open] > summary { margin-bottom: 10px; }
   const OTHER = '__other__';
 
   function chip(q) {
-    return `<span class="chip t-${q.t}" title="${E.TYPE_NAME[q.t]}, ${fmtP(q.p)}M power${q.id != null ? ', team ' + esc(q.id) : ''}"><b>${TS[q.t]}</b><span>${fmtP(q.p)}</span></span>`;
+    return `<span class="chip t-${q.t}" title="${E.TYPE_NAME[q.t]}, ${fmtP(q.p)}M listed power${q.x != null ? ', fights like ' + fmtP(effOf(q)) + 'M' : ''}${q.id != null ? ', team ' + esc(q.id) : ''}"><b>${TS[q.t]}</b><span>${fmtP(q.p)}</span></span>`;
   }
   function orderHTML(form, big) {
     return `<span class="order${big ? ' big' : ''}">${form.map(chip).join('<i class="arr" aria-hidden="true"></i>')}</span>`;
@@ -1473,7 +1554,7 @@ details[open] > summary { margin-bottom: 10px; }
     // On a public website each visitor starts by picking their own name.
     const owner = S.isOwner || (S.store !== 'db' && !S.standalone);
     return { me: S.personal.me || (owner ? S.shared.me : '') || '', myForm: S.personal.myForm || null,
-      bonus: S.shared.bonus, sigma: S.shared.sigma, attr: S.shared.attr, sims: S.shared.sims };
+      bonus: S.shared.bonus2, sigma: S.shared.sigma2, attr: S.shared.attr, sims: S.shared.sims };
   }
   const settings = () => (isDemo() ? Object.assign({}, baseSettings(), { me: demo().me, myForm: demo().myForm }) : baseSettings());
   const canAdmin = () => S.store !== 'db' || S.canEdit;
@@ -1562,9 +1643,16 @@ details[open] > summary { margin-bottom: 10px; }
   }
   const bump = () => { S.version++; };
 
+  // Squads typed in by hand have no strength reading. Borrow the multiplier of the same squad (team id, else type) from
+  // that player's latest battle report, so hand-entered power still fights at its true strength.
+  function borrowX(f, pl) {
+    const last = pl && pl.entries.length ? pl.entries[pl.entries.length - 1].form : null;
+    if (!f || !last) return f;
+    return f.map((q) => { if (q.x != null) return q; const m = last.find((z) => q.id != null && z.id === q.id) || last.find((z) => z.t === q.t); return m && m.x != null ? Object.assign({}, q, { x: m.x }) : q; });
+  }
   function myForm() {
     const f = valid(settings().myForm);
-    if (f) return f;
+    if (f) return borrowX(f, fullIndex().players[key(settings().me)]);
     const me = fullIndex().players[key(settings().me)];
     return me && me.entries.length ? me.entries[me.entries.length - 1].form : null;
   }
@@ -2029,7 +2117,7 @@ details[open] > summary { margin-bottom: 10px; }
       you += `<div class="field"><label class="lbl" for="shown">What they'll see of you</label>
         <select id="shown">${E.PERMS.map((_, k) => `<option value="${k}"${k === shownK ? ' selected' : ''}>${esc(permText(mc, k))}${k === ds.k ? (ds.fromLog ? ' (last fight)' : ' (current)') : ''}</option>`).join('')}</select>
         <p class="meta">They see the formation from your last fight, the same way you see theirs.</p></div>`;
-      const of = valid(S.oppForm);
+      const of = borrowX(valid(S.oppForm), pl);
       if (S.opp && of) {
         if (modelReady()) pr = E.predict(model(), { opp: S.opp, oppForm: S.oppEdited ? of : null, oppLastResult: S.oppResult, myForm: mf, myShown: E.orderSquads(mc, shownK) });
         else { waiting = true; buildModelSoon(); }
@@ -2041,7 +2129,7 @@ details[open] > summary { margin-bottom: 10px; }
     you += '</section>';
 
     let out;
-    if (pr) { const kill = pr.ev[pr.best] < 0.1 ? killPlan(pr, pl) : null; out = (kill ? killCard(pr, kill) : heroCard(pr)) + ovCard(pr, mf) + predCard(pr) + scoutCard(pl, pr, mf) + mixCard(pr) + mxCard(pr); }
+    if (pr) { const plan = killPlan(pr, pl), kill = pr.ev[pr.best] < 0.1 ? plan : null; byPoints(pr, plan); out = (kill ? killCard(pr, kill) : heroCard(pr, plan)) + ovCard(pr, mf) + predCard(pr) + scoutCard(pl, pr, mf) + mixCard(pr) + mxCard(pr); }
     else if (waiting) out = '<section class="card hero c-hero"><div class="card-h"><h2>Play this order</h2></div><div class="empty">Working out the call…</div></section>';
     else {
       const msg = !mf ? (hasLog && !meName ? 'Pick your name to get a call.' : 'Add your squads in Setup to get a call.') : !S.opp ? (S.oppManual ? 'Type their name and formation to get a call.' : 'Pick your opponent to get a call.') : 'Enter type and power for all three of their squads to get a call.';
@@ -2065,12 +2153,12 @@ details[open] > summary { margin-bottom: 10px; }
       ? `Keep it on ${esc(teamLabel(mf, now.id))}. Moving it doesn't improve this matchup.`
       : `Moving it to ${esc(teamLabel(mf, best.id))} raises your chance from ${pct(now.ev)} to ${pct(best.ev)}, with the order shown for that row.`;
     return `<section class="card c-ov" aria-labelledby="h-ov">
-      <div class="card-h"><h2 id="h-ov">Your Overlord</h2><span class="aside">adds ${fmtP(ex.op)}M to its squad</span></div>
+      <div class="card-h"><h2 id="h-ov">Your Overlord</h2><span class="aside">${fmtP(ex.op)}M listed, worth about ${fmtP(ex.op * E.DEFAULTS.ovValue)}M in a fight</span></div>
       <p class="callout">${head}</p>
       <div class="scroll"><table><thead><tr><th>Overlord on</th><th>Best order</th><th>Chance</th></tr></thead><tbody>
         ${spots.map((x) => `<tr${x === best && best.ev - now.ev >= 0.03 ? ' class="best"' : ''}><td>${esc(teamLabel(mf, x.id))}${x === now ? ' <span class="meta">now</span>' : ''}</td><td>${permHTML(x.pr.myCanon, x.pr.best)}</td><td>${pct(x.ev)}</td></tr>`).join('')}
       </tbody></table></div>
-      <p class="foot">${main ? `Your main type is ${E.TYPE_NAME[main]} (highest type bonus, our stand-in for mastery). ` : ''}Most players keep the Overlord on their main squad, next to their best gear. Moving it shifts the Overlord's own power and the few hundred troops it brings, not your gear.</p>
+      <p class="foot">${main ? `Your main type is ${E.TYPE_NAME[main]} (highest type bonus, our stand-in for mastery). ` : ''}Most players keep the Overlord on their main squad, next to their best gear. Moving it shifts the Overlord's own power and the few hundred troops it brings, not your gear. In 54 logged moves the squad that received an Overlord gained about half its listed power in true strength.</p>
     </section>`;
   }
   // Key facts about the chosen opponent, highlighted under their name in the Matchup card.
@@ -2078,6 +2166,8 @@ details[open] > summary { margin-bottom: 10px; }
     if (!pl || !pl.entries.length) return '';
     const es = pl.entries, n = es.length, facts = [];
     if (PROF[pl.pf]) facts.push({ t: PROF[pl.pf], hot: false });
+    const lff = es[n - 1].form;
+    if (hasX(lff)) { const l0 = lff.reduce((a, q) => a + q.p, 0), e0 = effSum(lff); facts.push({ t: `Fights like ${fmtP(e0)}M (${fmtP(l0)}M listed)`, hot: Math.abs(e0 / l0 - 1) >= 0.03 }); }
     const wins = es.filter((e) => e.won).length;
     const canon = E.canonical(es[n - 1].form).canon, perms = es.map((e) => E.matchPerm(e.form, canon));
     const sameAll = n >= 3 && new Set(perms).size === 1;
@@ -2111,12 +2201,44 @@ details[open] > summary { margin-bottom: 10px; }
     facts.push({ t: orx ? `${recOf(orx.r, S.race.round)} record` : `${wins}–${n - wins} record`, hot: false });
     return `<div class="facts" role="list" aria-label="Key facts">${facts.map((f) => `<span role="listitem" class="fact${f.hot ? ' hot' : ''}">${esc(f.t)}</span>`).join('')}</div>`;
   }
+  // Research, exclusive weapons, Overlord, drone and decorations of a player next to your own, from the raw battle reports.
+  const TREES = ['Hero', 'Units', 'Special Forces', 'Siege to Seize', 'Defense Fortifications', 'Tank Mastery', 'Missile Mastery', 'Air Mastery', 'Tactical Weapons'];
+  const TREE_ORDER = [0, 1, 2, 3, 4, 8, 5, 6, 7];
+  const EW_TIER = ['–', '<10', '10+', '20+', '30'];
+  function scoutTable(pl) {
+    const a = pl && pl.sc, me = fullIndex().players[key(settings().me)], b = me && me.key !== pl.key ? me.sc : null;
+    if (!a) return '';
+    const fa = pl.entries[pl.entries.length - 1].form, fb = b ? me.entries[me.entries.length - 1].form : null;
+    const num = (label, va, vb, sfx) => `<tr><th>${label}</th><td class="${vb != null && va > vb ? 'up' : ''}">${va != null ? va + (sfx || '') : '<span class="meta">–</span>'}</td>${b ? `<td class="${va != null && vb > va ? 'up' : ''}">${vb != null ? vb + (sfx || '') : '<span class="meta">–</span>'}</td>` : ''}</tr>`;
+    const bySquad = (sc, form, t, f) => { const i = form.findIndex((q) => q.t === t); return i < 0 ? null : f(sc, i); };
+    let out = TREE_ORDER.map((i) => num(TREES[i], a.tc[i], b ? b.tc[i] : null, '%')).join('');
+    ['T', 'M', 'A'].forEach((t) => {
+      const va = bySquad(a, fa, t, (sc, i) => sc.sq[i]), vb = b ? bySquad(b, fb, t, (sc, i) => sc.sq[i]) : null;
+      if (va != null || vb != null) out += num(`${E.TYPE_NAME[t]} squad research`, va, vb, '%');
+    });
+    ['T', 'M', 'A'].forEach((t) => {
+      const ew = (sc, i) => ({ p: sc.ew[i], s: String(sc.et[i] || '').split('').map((d) => EW_TIER[+d] || '–').join(' ') });
+      const va = bySquad(a, fa, t, ew), vb = b ? bySquad(b, fb, t, ew) : null;
+      if (!va && !vb) return;
+      const show = (v) => (v ? `${fmtP(v.p)}M <span class="meta">${v.s}</span>` : '<span class="meta">–</span>');
+      out += `<tr><th>${E.TYPE_NAME[t]} exclusive weapons</th><td class="${va && vb && va.p > vb.p ? 'up' : ''}">${show(va)}</td>${b ? `<td class="${va && vb && vb.p > va.p ? 'up' : ''}">${show(vb)}</td>` : ''}</tr>`;
+    });
+    out += num('Overlord level', a.ol != null ? a.ol : null, b && b.ol != null ? b.ol : null, '');
+    out += num('Drone level', a.dl != null ? a.dl : null, b && b.dl != null ? b.dl : null, '');
+    out += num('Decorations, top tier <span class="meta">(total levels)</span>', a.dc[1], b ? b.dc[1] : null, '');
+    out += num('Decorations, next tier <span class="meta">(total levels)</span>', a.dc[3], b ? b.dc[3] : null, '');
+    return `<div class="lbl"><span>Research and upgrades</span><span class="hint">from their latest battle report</span></div>
+      <div class="scroll"><table class="sct"><thead><tr><th></th><th>${esc(short(pl.name))}</th>${b ? '<th>You</th>' : ''}</tr></thead><tbody>${out}</tbody></table></div>
+      <p class="meta">Research is how much of each tree is done. Siege to Seize counts when you are the attacker and Defense Fortifications when you defend, and the game picks the attacker at random. In the reports both give their full +30% hero bonus from 70% on. Exclusive weapon levels are read off each weapon's power (30, 20+, 10+, under 10; – means none), one per hero.</p>`;
+  }
   // The opponent's main type, Overlord and mythic gear, and what changes if they move their Overlord.
   function scoutCard(pl, pr, mf) {
     const h = habitsOf(pl);
     if (!h) return '';
     const tl = (id) => esc(teamLabel(h.last.form, id)), rows = [];
     if (PROF[pl.pf]) rows.push(stat('Profession', PROF[pl.pf]));
+    if (hasX(h.last.form)) rows.push(stat('True strength <span class="meta">(listed power, adjusted by their stat sheet)</span>',
+      h.last.form.map((q) => `${TS[q.t]} ${fmtP(effOf(q))}M${q.x != null ? ` <span class="meta">${q.x >= 1 ? '+' : '−'}${Math.abs((q.x - 1) * 100).toFixed(1)}%</span>` : ''}`).join(' · ')));
     if (h.tbs.length) {
       const [t1, v1] = h.tbs[0], second = h.tbs[1];
       rows.push(stat('Main type <span class="meta">(highest type bonus)</span>', second && v1 - second[1] < 0.03
@@ -2149,26 +2271,49 @@ details[open] > summary { margin-bottom: 10px; }
         : `<p class="meta">If they move their Overlord, the order above still holds up.</p>`;
     }
     return `<section class="card c-scout" aria-labelledby="h-scout"><div class="card-h"><h2 id="h-scout">Their main squad</h2><span class="aside">from ${plural(h.n, 'report')}</span></div>
-      <div>${rows.join('')}</div>${alt}
+      <div>${rows.join('')}</div>${alt}${scoutTable(pl)}
       <p class="foot">Players with one high mastery almost never move the Overlord off that squad, and keep their best gear there too: in the reports, 97% have the Overlord on their main-type squad.</p></section>`;
   }
-  function heroCard(pr) {
+  // Listed power next to true strength, for both sides of the matchup.
+  function strengthNote(pr) {
+    if (pr.hasX && (pr.hasX.me || pr.hasX.opp)) {
+      const lst = (c) => c.reduce((n, q) => n + q.p, 0);
+      return `<p class="meta">Chances use true strength, read off every squad's stat sheet in the battle reports, not the listed power on the chips. You fight like <b>${fmtP(effSum(pr.myCanon))}M</b> (${fmtP(lst(pr.myCanon))}M listed), they fight like <b>${fmtP(effSum(pr.theirCanon))}M</b> (${fmtP(lst(pr.theirCanon))}M listed). <a href="#setup">How this is worked out</a></p>`;
+    }
+    return pr.prof && pr.prof.me && pr.prof.opp && pr.prof.me !== pr.prof.opp ? `<p class="meta">${pr.prof.me === 'W' ? 'You are a War Leader and they are an Engineer: your' : 'They are a War Leader and you are an Engineer: their'} squads count about ${Math.round(pr.prof.bonus * 100)}% stronger than listed here.</p>` : '';
+  }
+  // Seeding goes by total score, so when the win is safe (90%+) the call is the order that scores the most points
+  // among the orders that win about as often (within 2 points of the best win chance).
+  function byPoints(pr, plan) {
+    if (!plan || !plan.exp || !(pr.ev[pr.best] >= 0.9)) return;
+    const top = pr.ev[pr.best], ok = (i) => (pr.ev[i] >= top - 0.02 ? 1 : 0);
+    pr.ranked = pr.ranked.slice().sort((a, b) => (ok(b) - ok(a)) || (ok(a) && ok(b) ? plan.exp[b] - plan.exp[a] : 0));
+    pr.best = pr.ranked[0]; pr.byPoints = pr.ranked.filter(ok).length;
+  }
+  function pointsLine(pr, plan) {
+    if (!plan || !plan.exp) return '';
+    const b = pr.best;
+    if (pr.byPoints > 1) { const nx = pr.ranked[1]; return `<p class="callout key"><b>Best for points:</b> about <b>${kpts(plan.exp[b])}</b> expected, ${plan.exp[b] - plan.exp[nx] >= 1000 ? `${kpts(plan.exp[b] - plan.exp[nx])} more than the next best order` : 'level with the next best order'}. ${plural(pr.byPoints, 'order')} win${pr.byPoints === 1 ? 's' : ''} about as often, so the call goes by points.</p>`; }
+    return `<p class="callout">Points: about <b>${kpts(plan.exp[b])}</b> expected with this order.</p>`;
+  }
+  function heroCard(pr, plan) {
     const b = pr.best, ev = pr.ev[b], gain = ev - pr.nash.value;
     const others = pr.ranked.slice(1);
     const minAll = Math.min.apply(null, pr.worst), maxAll = Math.max.apply(null, pr.ev);
-    const lopsided = minAll >= 0.98 ? 'Every order wins this fight: your squads are far stronger, so order only matters for how many troops you keep.'
+    const lopsided = minAll >= 0.98 ? 'Every order wins this fight: your squads are far stronger. The order shown keeps the most troops and scores the most points.'
       : maxAll <= 0.02 ? 'No order wins this one on paper: their squads are far stronger. The order shown loses the least badly.' : '';
     return `<section class="card hero c-hero" aria-labelledby="h-hero">
       <div class="card-h"><h2 id="h-hero">Play this order</h2><span class="stamp">vs ${esc(short(S.opp))}</span></div>
       ${permHTML(pr.myCanon, b, true)}
       <div class="big-row"><span class="big-num">${pct(ev)}</span><span class="cap">chance to win if they play the way the model expects</span></div>
-      ${pr.prof && pr.prof.me && pr.prof.opp && pr.prof.me !== pr.prof.opp ? `<p class="meta">${pr.prof.me === 'W' ? 'You are a War Leader and they are an Engineer: your' : 'They are a War Leader and you are an Engineer: their'} squads count about ${Math.round(pr.prof.bonus * 100)}% stronger than listed here. In the logged fights between the two professions, the War Leader won 84% at equal power.</p>` : ''}
+      ${strengthNote(pr)}
+      ${pointsLine(pr, plan)}
       ${ev >= 0.35 && ev <= 0.65 ? '<p class="callout key"><b>Key match:</b> about even. Toss-ups like this decide the top 8, so check their latest formation in the game before you lock in.</p>' : ''}
       ${lopsided ? `<p class="callout">${lopsided}</p>` : `<p class="callout">Worst case ${pct(pr.worst[b])}, if they play ${minis(E.orderSquads(pr.theirCanon, pr.worstAgainst[b]))}. ${gain < 0.02 ? 'Reading this player barely helps here, so the safe mix below is about as good.' : `The safe mix only guarantees ${pct(pr.nash.value)}.`}</p>`}
-      <div class="scroll"><table><thead><tr><th>Other orders</th><th>If predicted</th><th>Worst case</th></tr></thead><tbody>
-        ${others.map((k) => `<tr><td>${permHTML(pr.myCanon, k)}</td><td>${pct(pr.ev[k])}</td><td>${pct(pr.worst[k])}</td></tr>`).join('')}
+      <div class="scroll"><table><thead><tr><th>Other orders</th>${plan && plan.exp ? '<th>Points</th>' : ''}<th>If predicted</th>${pr.byPoints > 1 ? '' : '<th>Worst case</th>'}</tr></thead><tbody>
+        ${others.map((k) => `<tr><td>${permHTML(pr.myCanon, k)}</td>${plan && plan.exp ? `<td>${kpts(plan.exp[k])}</td>` : ''}<td>${pct(pr.ev[k])}</td>${pr.byPoints > 1 ? '' : `<td>${pct(pr.worst[k])}</td>`}</tr>`).join('')}
       </tbody></table></div>
-      <p class="foot">Whatever you play now becomes the formation your next opponent sees.</p>
+      <p class="foot">Points are what the order is expected to score against the orders they are likely to play. Whatever you play now becomes the formation your next opponent sees.</p>
     </section>`;
   }
   function predCard(pr) {
@@ -2232,6 +2377,7 @@ details[open] > summary { margin-bottom: 10px; }
     }).join('');
     const right = `<section class="card"><div class="card-h"><h2>${esc(p.name)}${profTag(p.name)}</h2><button type="button" class="btn small primary" data-act="scout" data-name="${esc(p.name)}">Scout as next opponent</button></div>
       <div class="row"><span class="lbl">Latest order</span>${orderHTML(latest.form)}</div>
+      ${hasX(latest.form) ? `<p class="meta">True strength: ${effLine(latest.form)} · ${fmtP(effSum(latest.form))}M in all (${fmtP(latest.form.reduce((n, q) => n + q.p, 0))}M listed)</p>` : ''}
       <div class="lbl"><span>How they decide</span><span class="hint">${scored.length ? `Model called ${hits} of ${scored.length} of their fights right` : 'Needs two fights to test the model'}</span></div>
       <div class="stack">${tendRows(w)}</div>
       ${m.playerRm[sk].n ? `<p class="meta">In ${plural(m.playerRm[sk].n, 'rematch')}, the model puts ${pct(m.playerRm[sk].r)} weight on them remembering the last meeting (replaying what won, or countering what beat them).</p>` : ''}
@@ -2327,12 +2473,12 @@ details[open] > summary { margin-bottom: 10px; }
     me += '</section>';
     const st2 = settings(), nb = isDemo() ? 0 : S.battles.length;
     let tune = `<section class="card"><div class="card-h"><h2>Tune the fight simulator</h2></div>
-      <p>Right now a counter squad fights as if it had ${pct(+st2.bonus, 1)} more power, and real strength can drift about ${pct(+st2.sigma, 1)} from listed power.</p>`;
+      <p>Right now a counter squad fights as if it were ${pct(+st2.bonus, 1)} stronger, and a squad can drift about ${pct(+st2.sigma, 1)} from its true strength.</p>`;
     if (isDemo()) tune += '<p class="meta">Tuning works on your own battles, not the example data.</p>';
     else if (nb < 8) tune += `<p class="meta">Log at least 8 battles to tune it (you have ${nb}).</p>`;
     else tune += `<div><button type="button" class="btn" data-act="cal"${S.busy ? ' disabled' : ''}>${S.busy === 'cal' ? 'Tuning…' : 'Tune to my battles'}</button></div>`;
     if (S.cal && !isDemo()) {
-      const c = S.cal, same = Math.abs(c.best.bonus - st2.bonus) < 1e-9 && Math.abs(c.best.sigma - st2.sigma) < 1e-9 && Math.abs((c.best.attr || 1.5) - (+st2.attr || 1.5)) < 1e-9;
+      const c = S.cal, same = Math.abs(c.best.bonus - st2.bonus) < 1e-9 && Math.abs(c.best.sigma - st2.sigma) < 1e-9;
       tune += `<p>Best fit on ${c.level === 'encounter' ? `${plural(c.n, 'encounter')} from ${plural(c.battles, 'battle')}` : plural(c.n, 'battle')}: counter edge ${pct(c.best.bonus, 1)}, drift ${pct(c.best.sigma, 1)}. With those settings the stronger side wins ${pct(c.accuracy)} of the logged ${c.level === 'encounter' ? 'encounters' : 'fights'}.</p>
         ${same ? '<p class="meta">The tracker already uses these settings.</p>' : canAdmin() ? '<div><button type="button" class="btn primary" data-act="calapply">Use these settings</button></div>' : '<p class="meta">Only the tracker\'s owner can change these settings.</p>'}`;
     }
@@ -2380,154 +2526,95 @@ details[open] > summary { margin-bottom: 10px; }
   // How much stronger your squad was going into an encounter: power x troops left x counter edge, yours over theirs.
   const edgeOf = (x, bonus) => (x.mf * x.mine.p * (E.BEATS[x.mine.t] === x.theirs.t ? 1 + bonus : 1)) / Math.max(1e-9, x.tf * x.theirs.p * (E.BEATS[x.theirs.t] === x.mine.t ? 1 + bonus : 1));
   const CLEAR_EDGE = 1.1; // "clearly the stronger side": 10% or more
+  // Full troops of every squad in one fight (by team id) from its encounters, and the points this player scored.
+  function fightTroops(e) {
+    const D = window.DuelRace, a = e.side === 'a', m = {}, t = {}, lastM = {}, lastT = {};
+    (Array.isArray(e.enc) ? e.enc : []).forEach((x) => {
+      const mid = String(a ? x[0] : x[1]), tid = String(a ? x[1] : x[0]);
+      if (m[mid] == null) m[mid] = +(a ? x[3] : x[5]);
+      if (t[tid] == null) t[tid] = +(a ? x[5] : x[3]);
+      lastM[mid] = +(a ? x[4] : x[6]); lastT[tid] = +(a ? x[6] : x[4]);
+    });
+    const sum = (o) => Object.values(o).reduce((s, v) => s + v, 0);
+    const known = Object.keys(m).length === 3 && Object.keys(t).length === 3;
+    const pts = !known || !D ? null : e.won ? D.WIN_BONUS + D.PER_TROOP * ((sum(t) - sum(lastT)) + sum(lastM)) : D.PER_TROOP * (sum(t) - sum(lastT));
+    return { mine: m, theirs: t, pts };
+  }
+  const TIP_MIN = 20000;  // an order tip needs to be worth at least this many points
+  const kpts = (v) => (Math.abs(v) >= 999500 ? `${(v / 1e6).toFixed(2)}M` : `${Math.round(v / 1000).toLocaleString()}K`);
+  // Every logged fight of one player, replayed with each of their six orders against the order the opponent really played.
+  // Points count as the game counts them (a win: 300,000 + 66 per enemy troop killed and per own troop kept; a loss: 66
+  // per enemy troop killed), so an order can be better without changing who wins.
   function insightsFor(pl) {
-    const st = settings(), P = fullIndex().players, bonus = +st.bonus;
-    const opt = { bonus, sigma: +st.sigma, attr: +st.attr || 1.5, n: 300 };
-    const opt0 = opt;
+    const st = settings(), P = fullIndex().players, D = window.DuelRace;
+    const opt0 = { bonus: +st.bonus, sigma: +st.sigma, attr: +st.attr || 1.5, n: 300 };
     return pl.entries.map((e) => {
-      const opt = Object.assign({}, opt0, { ma: E.profMult(pl.pf), mb: E.profMult((P[e.oppKey] || {}).pf) }); // professions of both
-      const mine = E.canonical(e.form), theirs = E.canonical(e.oppForm);
-      const W = E.winMatrix(mine.canon, theirs.canon, opt);
-      const played = W[mine.perm][theirs.perm], bk = colBest(W, theirs.perm), best = W[bk][theirs.perm];
-      // Your Overlord on another of your teams, against the order they actually played.
+      const op = P[e.oppKey];
+      const opt = Object.assign({}, opt0, { ma: E.profMult(pl.pf), mb: E.profMult((op || {}).pf) });
+      const mine = E.canonical(e.form), theirs = E.canonical(e.oppForm), tr = fightTroops(e);
+      const trM = mine.canon.map((q) => (q.id != null && tr.mine[String(q.id)]) || 2800), trT = theirs.canon.map((q) => (q.id != null && tr.theirs[String(q.id)]) || 2800);
+      const M = D.ordersMatrix(mine.canon, theirs.canon, trM, trT, opt);
+      const j = theirs.perm, i0 = mine.perm;
+      let b = i0;
+      for (let i = 0; i < 6; i++) if (M.mine[i][j] > M.mine[b][j] + 1e-6) b = i;
+      // What they had shown before this fight: their orders in every earlier logged fight.
+      const prev = op ? op.entries.filter((x) => x.round < e.round) : [];
+      let hist = null;
+      if (prev.length) {
+        const perms = prev.map((x) => E.matchPerm(x.form, theirs.canon)), cnt = [0, 0, 0, 0, 0, 0], n = perms.length, last = prev[n - 1];
+        perms.forEach((k) => { cnt[k]++; });
+        const mode = E.argmax(cnt);
+        hist = { n, mode, c: cnt[mode], lastRound: last.round, lastVs: last.oppKey === pl.key ? 'you' : last.oppName,
+          obvious: n >= 3 && cnt[mode] / n >= 0.8, followed: j === mode, repeated: j === perms[n - 1], usual: E.orderSquads(theirs.canon, mode) };
+      }
+      // Your Overlord on another of your teams, against the order they actually played (shown in Fight by fight only).
       let ov = null;
       if (e.ex && e.ex.ov && e.ex.op > 0) e.form.forEach((q) => {
         if (!q.id || q.id === e.ex.ov) return;
         const c2 = E.canonical(E.moveOverlord(e.form, e.ex, q.id)), W2 = E.winMatrix(c2.canon, theirs.canon, opt), k2 = colBest(W2, theirs.perm);
         if (!ov || W2[k2][theirs.perm] > ov.chance) ov = { id: q.id, chance: W2[k2][theirs.perm], order: E.orderSquads(c2.canon, k2) };
       });
-      // What they had shown before this fight: their previous logged formation.
-      const op = P[e.oppKey], prev = op ? op.entries.filter((x) => x.round < e.round) : [];
-      let shown = null;
-      if (prev.length) {
-        const pv = prev[prev.length - 1], sc = E.canonical(pv.form), W3 = E.winMatrix(mine.canon, sc.canon, opt), k3 = colBest(W3, sc.perm);
-        shown = { vs: W3[mine.perm][sc.perm], best: W3[k3][sc.perm], order: E.orderSquads(mine.canon, k3), form: pv.form, round: pv.round,
-          vsName: pv.oppKey === pl.key ? 'you' : pv.oppName, repeated: E.matchPerm(e.oppForm, sc.canon) === sc.perm };
-      }
-      const tags = [];
-      if (!e.won && best >= 0.6 && best - played >= 0.25) tags.push('order');
-      if (!e.won && ov && ov.chance >= 0.6 && ov.chance - Math.max(played, best) >= 0.15) tags.push('overlord');
-      if (shown && shown.best - shown.vs >= 0.25) tags.push('risky');
-      if (!e.won && Math.max(best, ov ? ov.chance : 0) < 0.35) tags.push('outmatched');
+      const played = M.W[i0][j], best = M.W[b][j], gain = M.mine[b][j] - M.mine[i0][j], tags = [];
+      if (gain >= TIP_MIN) tags.push('order');
+      if (hist && hist.obvious) tags.push('pattern');
       if (!e.won && played >= 0.6) tags.push('unlucky');
       if (e.won && played < 0.4) tags.push('lucky');
-      // Lost on power: how much more power on your two strongest squads would have made it an even fight.
-      let even = null;
-      if (tags.includes('outmatched')) {
-        const top2 = e.form.map((q, i) => i).sort((i, j) => e.form[j].p - e.form[i].p).slice(0, 2);
-        const at = (s) => {
-          const c = E.canonical(e.form.map((q, i) => { const p = top2.includes(i) ? q.p * s : q.p; return q.id != null ? { t: q.t, p, id: q.id } : { t: q.t, p }; }));
-          const W4 = E.winMatrix(c.canon, theirs.canon, opt);
-          return W4[colBest(W4, theirs.perm)][theirs.perm];
-        };
-        if (at(2) >= 0.5) { let lo = 1, hi = 2; for (let i = 0; i < 7; i++) { const m = (lo + hi) / 2; if (at(m) >= 0.5) hi = m; else lo = m; } even = hi; } else even = Infinity;
-      }
-      // The encounter that hurt most: one of your squads losing while it was clearly the stronger side.
-      const enc = encountersOf(e);
-      let upset = null;
-      enc.forEach((x) => { const g = edgeOf(x, bonus); if (!x.won && g >= CLEAR_EDGE && (!upset || g > upset.edge)) upset = { x, edge: g }; });
-      return { e, played, best, bestOrder: E.orderSquads(mine.canon, bk), ov, shown, tags, enc, even, upset };
+      return { e, played, best, pts: M.mine[i0][j], bestPts: M.mine[b][j], bestOrder: E.orderSquads(mine.canon, b), gain, actual: tr.pts, hist, ov, tags };
     });
   }
-  // Each of a player's squads (by team) across all their fights: encounters fought and won, and losses while clearly stronger.
-  function squadRecords(rows, bonus) {
-    const R = {};
-    rows.forEach((r) => r.enc.forEach((x) => {
-      if (x.mine.id == null) return;
-      const s = R[String(x.mine.id)] || (R[String(x.mine.id)] = { n: 0, w: 0, upsets: [] });
-      s.n++;
-      if (x.won) s.w++;
-      const g = edgeOf(x, bonus);
-      if (!x.won && g >= CLEAR_EDGE) s.upsets.push({ r, x, edge: g });
-    }));
-    return R;
-  }
-  const TAG = { order: ['bad', 'Order'], overlord: ['bad', 'Overlord'], risky: ['warn', 'Risky pick'], outmatched: ['', 'Outmatched'], unlucky: ['', 'Unlucky'], lucky: ['ok', 'Lucky win'] };
+  const TAG = { order: ['bad', 'Order'], pattern: ['warn', 'Had a pattern'], unlucky: ['', 'Unlucky'], lucky: ['ok', 'Lucky win'] };
   const MAX_FIGHT_TIPS = 5;
+  // Only order switches: fights where another order of the same squads would have scored more against the order the
+  // opponent played. Opponents who had an obvious pattern and kept to it come first.
   function insightTips(pl, rows) {
-    const tips = [], bonus = +settings().bonus, lf = pl.entries[pl.entries.length - 1].form;
-    const who = (e) => `R${e.round} vs ${e.oppName}`, whoH = (e) => `<b>R${esc(e.round)} vs ${esc(e.oppName)}</b>`;
-    // 1. Fights where a different order or Overlord spot would likely have changed the result, costliest first.
-    const fights = [];
-    rows.forEach((r) => {
-      const e = r.e, sh = r.shown, t = r.tags;
-      const scout = !sh ? (e.round <= 1 ? 'It was round 1, so there was nothing to scout.' : 'None of their earlier fights is logged, so there was nothing to scout.')
-        : sh.repeated ? `They played the same order as in R${sh.round} (vs ${sh.vsName}), so you could have seen it coming.`
-        : `They changed their order from R${sh.round} (vs ${sh.vsName}), so it was hard to see coming.`;
-      const they = { k: 'They played', form: e.oppForm }, you = (ch) => ({ k: 'You played', form: e.form, ch });
-      if (t.includes('overlord')) {
-        const to = e.form.find((q) => q.id === r.ov.id), from = e.form.find((q) => q.id === e.ex.ov);
-        fights.push({ gain: r.ov.chance - r.played, hot: true, h: `${who(e)}: you should have moved your Overlord to your ${sqName(to, e.form)} squad`,
-          p: `Your setup had ${chanceOf(r.played)} against theirs. With the Overlord moved${from ? ` off your ${sqName(from, e.form)} squad` : ''} and the order below, it was about ${pct(r.ov.chance)}.${t.includes('order') ? ` Changing only your order would have given about ${pct(r.best)}.` : ''} ${scout}`,
-          rows: [they, you(r.played), { k: 'Better', form: r.ov.order, ch: r.ov.chance }] });
-      } else if (t.includes('order')) {
-        fights.push({ gain: r.best - r.played, hot: true, h: `${who(e)}: you should have ${orderFix(e.form, r.bestOrder) || 'changed your order'}`,
-          p: `Your order had ${chanceOf(r.played)} against theirs; the better order below had about ${pct(r.best)}. ${scout}${sh && !sh.repeated && t.includes('risky') ? ` Your order was a weak answer to their R${sh.round} order too (${pct(sh.vs)}).` : ''}`,
-          rows: [they, you(r.played), { k: 'Better', form: r.bestOrder, ch: r.best }] });
-      } else if (t.includes('risky')) {
-        const end = sh.repeated ? (e.won ? (sh.vs < 0.5 ? 'They played it again, so this win was lucky.' : 'They played it again; you won, but the better order was safer.') : 'They played it again; the better order was your best shot.')
-          : (e.won ? 'They switched, which happened to suit you.' : 'They switched, so the better order might not have saved this fight.');
-        fights.push({ gain: (sh.best - sh.vs) * (e.won ? 0.5 : 1), hot: !e.won, h: `${who(e)}: ${e.won ? 'you won, but ' : ''}you should have ${orderFix(e.form, sh.order) || 'changed your order'}`,
-          p: `In R${sh.round} (vs ${sh.vsName}) they played the order below, and your order had only ${chanceOf(sh.vs)} against it; the better order had about ${pct(sh.best)}. ${end}`,
-          rows: [{ k: `Their R${sh.round}`, form: sh.form }, you(sh.vs), { k: 'Better', form: sh.order, ch: sh.best }] });
-      }
+    const tips = [], who = (e) => `R${e.round} vs ${e.oppName}`;
+    const cand = rows.filter((r) => r.gain >= TIP_MIN).map((r) => {
+      const e = r.e, h = r.hist;
+      // 3: an obvious pattern, and they kept to it. 2: they repeated their fight before. 1: they switched. 0: nothing to scout.
+      const rank = !h ? 0 : h.obvious && h.followed ? 3 : h.repeated ? 2 : 1;
+      let scout;
+      if (!h) scout = e.round <= 1 ? 'It was round 1, so there was nothing to scout.' : 'None of their earlier fights is logged, so there was nothing to scout.';
+      else if (rank === 3) scout = `They had played this exact order in ${h.c === h.n ? `all ${h.n}` : `${h.c} of their ${h.n}`} earlier fights, so it was there to be read.`;
+      else if (rank === 2) scout = `They played the same order as in their fight before (R${h.lastRound} vs ${h.lastVs}), so you could have seen it coming.`;
+      else if (h.obvious) scout = `They had played another order in ${h.c} of their ${h.n} earlier fights and switched for this one, so it was hard to see coming.`;
+      else scout = `They changed their order from their fight before (R${h.lastRound} vs ${h.lastVs}), so it was hard to see coming.`;
+      const fix = orderFix(e.form, r.bestOrder) || 'changed your order';
+      const win = Math.abs(r.best - r.played) >= 0.03 ? ` Your win chance would have gone from ${pct(r.played)} to ${pct(r.best)}.` : '';
+      return { rank, gain: r.gain, hot: rank >= 2, h: `${who(e)}: you should have ${fix}`,
+        p: `Worth about ${kpts(r.gain)} more points: about ${kpts(r.bestPts)} with the order below, against ${kpts(r.pts)} with the one you played.${win} ${scout}`,
+        rows: [{ k: 'They played', form: e.oppForm }, { k: 'You played', form: e.form, pts: r.pts, ch: r.played }, { k: 'Better', form: r.bestOrder, pts: r.bestPts, ch: r.best }] };
     });
-    fights.sort((x, y) => (y.hot - x.hot) || (y.gain - x.gain));
-    fights.slice(0, MAX_FIGHT_TIPS).forEach((f) => tips.push(f));
-    if (fights.length > MAX_FIGHT_TIPS) {
-      const rest = fights.slice(MAX_FIGHT_TIPS).map((f) => f.h.split(':')[0]);
-      tips.push({ hot: false, h: `${plural(rest.length, 'more fight')} like these`, p: `${rest.join(', ')}. Details are in Fight by fight.` });
+    cand.sort((x, y) => (y.rank - x.rank) || (y.gain - x.gain));
+    cand.slice(0, MAX_FIGHT_TIPS).forEach((f) => tips.push(f));
+    if (cand.length > MAX_FIGHT_TIPS) {
+      const rest = cand.slice(MAX_FIGHT_TIPS);
+      tips.push({ hot: false, h: `${plural(rest.length, 'more fight')} like these`, p: `${rest.map((f) => `${f.h.split(':')[0]} (${kpts(f.gain)})`).join(', ')}. Details are in Fight by fight.` });
     }
-    // 2. Overlord and best gear away from the main type.
-    const h = habitsOf(pl);
-    if (h && h.main && h.tbs.length > 1 && h.tbs[0][1] - h.tbs[1][1] >= 0.03) {
-      const main = TN(h.main), lfx = h.last.form, tb = pct(h.tbs[0][1], 1);
-      const ovSq = h.ov ? lfx.find((q) => q.id === h.ov) : null, mainSq = lfx.find((q) => q.t === h.main);
-      // Best-geared squad: by gear power when the report gives it (it counts levels and stars), else by mythic pieces.
-      const byPower = h.gpTeams.length > 0, gTeam = byPower ? h.gpTeams[0] : (h.m6Teams.length ? h.m6Teams[0] : null), gSq = gTeam ? lfx.find((q) => q.id === gTeam) : null;
-      if (ovSq && ovSq.t !== h.main) tips.push({ hot: true, h: `Move your Overlord to your ${main} squad`, p: `${main} is your highest type bonus (${tb}), a sign it's where you have the most mastery, and strong players keep the Overlord there. It's on your ${sqName(ovSq, lfx)} squad now.` });
-      if (gSq && gSq.t !== h.main && byPower) {
-        // Only when the gap is clear: at least 10% more gear power than the main-type squad.
-        if (mainSq && h.gp[gTeam] >= 1.1 * (h.gp[mainSq.id] || 0)) tips.push({ hot: true, h: `Move your best gear to your ${main} squad`, p: `Your strongest gear is on your ${sqName(gSq, lfx)} squad: ${fmtM(h.gp[gTeam])} of gear power, against ${fmtM(h.gp[mainSq.id] || 0)} on your ${main} squad. Gear does the most on the squad with your most mastery, which is ${main} (${tb} type bonus).` });
-      } else if (gSq && gSq.t !== h.main) tips.push({ hot: true, h: `Move your mythic gear to your ${main} squad`, p: `${h.m6[gTeam]} of your ${h.m6Total} mythic pieces are on your ${sqName(gSq, lfx)} squad. Gear does the most on the squad with your most mastery, which is ${main} (${tb} type bonus).` });
-    }
-    // 3. Lost on power.
-    const out = rows.filter((r) => r.tags.includes('outmatched'));
-    if (out.length) {
-      const line = (r) => {
-        const e = r.e, mp = sumP(e.form), tp = sumP(e.oppForm), minT = Math.min(...e.oppForm.map((q) => q.p)), maxM = Math.max(...e.form.map((q) => q.p));
-        const top2p = e.form.map((q) => q.p).sort((a, b) => b - a).slice(0, 2).reduce((a, b) => a + b, 0);
-        let s = `Their squads had ${fmtM(tp)} in total, yours ${fmtM(mp)}. Your best order had ${chanceOf(Math.max(r.best, r.ov ? r.ov.chance : 0))}`;
-        s += r.even === Infinity ? '; even doubling your two strongest squads would not have been enough.' : r.even ? `; about ${fmtM(top2p * (r.even - 1))} more power on your two strongest squads would have made it an even fight.` : '.';
-        if (minT > maxM) s += ` Even their weakest squad (${fmtM(minT)}) was stronger than your strongest (${fmtM(maxM)}).`;
-        return s;
-      };
-      tips.push(out.length === 1
-        ? { hot: false, h: `${who(out[0].e)}: lost on power, no order would have won`, p: `${line(out[0])} This needs more power on your strongest squads, not a new order.` }
-        : { hot: false, h: `${plural(out.length, 'loss')} on power: no order would have won these`, list: out.map((r) => `${whoH(r.e)}: ${esc(line(r))}`), p2: 'These need more power on your strongest squads, not a new order.' });
-    }
-    // 4. Your two strongest squads: flag one that keeps losing encounters it should win.
-    const recs = squadRecords(rows, bonus), rec = (q) => (q.id != null ? recs[String(q.id)] : null);
-    const top2 = lf.slice().sort((x, y) => y.p - x.p).slice(0, 2);
-    top2.forEach((q) => {
-      const r = rec(q);
-      if (!r || r.upsets.length < 2) return;
-      const ex = r.upsets.slice().sort((a, b) => b.edge - a.edge).slice(0, 3).map((u) => `${who(u.r.e)} (to their ${TN(u.x.theirs.t)} ${fmtM(u.x.theirs.p)}${u.x.tf < 0.95 ? ` with ${pct(u.x.tf)} of its troops left` : ''})`);
-      tips.push({ hot: r.upsets.length >= 3, h: `Check your ${sqName(q, lf)} squad (${fmtM(q.p)}): it loses encounters it should win`,
-        p: `It lost ${plural(r.upsets.length, 'encounter')} where it was clearly the stronger side${r.upsets.length > 3 ? ', including' : ':'} ${ex.join(', ')}. Hero power doesn't show troop tier, drone, chips or skills, so one of those is likely behind on this squad.` });
-    });
-    // 5. Losses the simulator expected you to win.
-    const unl = rows.filter((r) => r.tags.includes('unlucky') && !r.tags.includes('order') && !r.tags.includes('overlord'));
-    const why = (r) => (r.upset ? ` ${sqIn(r.upset.x.mine, r.upset.x.mf, 'your', r.e.form).replace(/^y/, 'Y')} lost to ${sqIn(r.upset.x.theirs, r.upset.x.tf, 'their')} while it was clearly the stronger side.` : '');
-    if (unl.length === 1) tips.push({ hot: false, h: `${who(unl[0].e)}: you lost a fight you should have won`, p: `The simulator gave you ${chanceOf(unl[0].played)}, so your order wasn't the problem.${why(unl[0])} Hero power doesn't show troop tier, drone, chips or skills.` });
-    else if (unl.length) tips.push({ hot: unl.length >= 3, h: `${plural(unl.length, 'loss')} you should have won`, list: unl.map((r) => `${whoH(r.e)}: ${esc(`the simulator gave you ${chanceOf(r.played)}.${why(r)}`)}`), p2: "Your order wasn't the problem in these. Hero power doesn't show troop tier, drone, chips or skills." });
-    // 6. Mixed squads.
-    lf.filter((q) => q.t === 'X').forEach((q) => tips.push({ hot: false, h: `Make your ${fmtM(q.p)} mixed squad one type`, p: 'Without 3 heroes of one type it gets no counter edge in the simulator, and guides say 5 heroes of one type earn the biggest type bonus in the game.' }));
-    if (!tips.length) tips.push({ hot: false, h: 'No clear mistakes found', p: rows.some((r) => !r.e.won) ? 'Your losses were close or against stronger squads.' : 'Every logged fight was a win.' });
+    if (!tips.length) tips.push({ hot: false, h: 'No points left on the table', p: `In every logged fight your order was within ${kpts(TIP_MIN)} points of the best one against the order they played.` });
     return tips;
   }
   function tipHTML(t) {
-    const rows = t.rows ? `<div class="tip-rows">${t.rows.map((x) => `<div class="tip-row${x.k === 'Better' ? ' better' : ''}"><span class="k">${esc(x.k)}${x.ch != null ? ` <b>${pct(x.ch)}</b>` : ''}</span>${orderHTML(x.form)}</div>`).join('')}</div>` : '';
+    const rows = t.rows ? `<div class="tip-rows">${t.rows.map((x) => `<div class="tip-row${x.k === 'Better' ? ' better' : ''}"><span class="k">${esc(x.k)}${x.pts != null ? ` <b>${kpts(x.pts)}</b>` : ''}${x.ch != null ? ` <span class="meta">${pct(x.ch)}</span>` : ''}</span>${orderHTML(x.form)}</div>`).join('')}</div>` : '';
     const list = t.list ? `<ul class="tip-list">${t.list.map((x) => `<li>${x}</li>`).join('')}</ul>` : '';
     return `<div class="tip${t.hot ? ' hot' : ''}"><h3>${esc(t.h)}</h3>${t.p ? `<p>${esc(t.p)}</p>` : ''}${list}${rows}${t.p2 ? `<p class="meta">${esc(t.p2)}</p>` : ''}</div>`;
   }
@@ -2548,6 +2635,8 @@ details[open] > summary { margin-bottom: 10px; }
     const wins = rows.filter((r) => r.e.won).length;
     const facts = [stat('Record', `${wins}–${rows.length - wins}`)];
     if (PROF[pl.pf]) facts.push(stat('Profession', PROF[pl.pf]));
+    const lfm = pl.entries[pl.entries.length - 1].form;
+    if (hasX(lfm)) facts.push(stat('True strength <span class="meta">(listed)</span>', `${lfm.map((q) => `${TS[q.t]} ${fmtP(effOf(q))}M`).join(' · ')} <span class="meta">(${lfm.map((q) => fmtP(q.p)).join(' · ')})</span>`));
     if (h) {
       if (h.tbs.length) facts.push(stat('Main type <span class="meta">(highest type bonus)</span>', h.tbs.length > 1 && h.tbs[0][1] - h.tbs[1][1] < 0.03 ? 'Balanced' : E.TYPE_NAME[h.tbs[0][0]]));
       if (h.ov) facts.push(stat('Overlord', `${esc(teamLabel(h.last.form, h.ov))}${h.ovMoves ? ' · moved ' + plural(h.ovMoves, 'time') : ''}`));
@@ -2555,18 +2644,19 @@ details[open] > summary { margin-bottom: 10px; }
       facts.push(stat('Mythic gear <span class="meta">(5★ pieces)</span>', h.m6Total ? h.m6Teams.map((id) => `${h.m6[id]} on ${esc(teamLabel(h.last.form, id))}`).join(', ') : 'none'));
     }
     const head = `<section class="card"><div class="card-h"><h2>Insights</h2><span class="aside">${plural(rows.length, 'fight')}</span></div>${pick}<div>${facts.join('')}</div></section>`;
-    const tipCard = `<section class="card"><div class="card-h"><h2>What to work on</h2></div><div class="stack">${tips.map(tipHTML).join('')}</div>
-      <p class="foot">Chances are the tracker's estimates from each fight's real squad powers (its simulator calls about 94% of fights right).</p></section>`;
+    const lost = rows.reduce((n, r) => n + (r.gain >= TIP_MIN ? r.gain : 0), 0);
+    const tipCard = `<section class="card"><div class="card-h"><h2>What to work on</h2>${lost ? `<span class="aside">about ${kpts(lost)} points in all</span>` : ''}</div><div class="stack">${tips.map(tipHTML).join('')}</div>
+      <p class="foot">Only order switches are listed: the same squads in another order, against the order your opponent really played. Points are the tracker's estimate with each squad's true strength and troops (bold), with the win chance next to them. A win scores 300,000 plus 66 per enemy troop killed and per troop you keep; a loss scores 66 per enemy troop killed. Tested on the logged fights, the simulator calls 96% right and is off by about 41K points per fight.</p></section>`;
     const fights = rows.slice().reverse().map((r) => {
       const e = r.e, tags = r.tags.map((t) => `<span class="tag ${TAG[t][0]}">${TAG[t][1]}</span>`).join(' ');
-      let lines = `<div class="ins-line"><span class="k">You</span>${orderHTML(e.form)}<span class="meta">${pct(r.played)}</span></div>
-        <div class="ins-line"><span class="k">They</span>${orderHTML(e.oppForm)}</div>`;
-      if (r.best - r.played >= 0.1) lines += `<div class="ins-line"><span class="k">Best order</span>${orderHTML(r.bestOrder)}<span class="meta">${pct(r.best)}</span></div>`;
+      const hh = r.hist;
+      let lines = `<div class="ins-line"><span class="k">You</span>${orderHTML(e.form)}<span class="meta">${kpts(r.pts)} expected${r.actual != null ? ` · scored ${kpts(r.actual)}` : ''} · ${pct(r.played)}</span></div>
+        <div class="ins-line"><span class="k">They</span>${orderHTML(e.oppForm)}${hh ? `<span class="meta">${hh.obvious ? (hh.followed ? `their usual order (${hh.c} of ${hh.n} earlier fights)` : `not their usual order (${hh.c} of ${hh.n} earlier fights)`) : hh.repeated ? 'same as their fight before' : 'changed from their fight before'}</span>` : ''}</div>`;
+      if (r.gain >= 10000) lines += `<div class="ins-line"><span class="k">Best order</span>${orderHTML(r.bestOrder)}<span class="meta">${kpts(r.bestPts)} expected, ${kpts(r.gain)} more · ${pct(r.best)}</span></div>`;
       if (r.ov && r.ov.chance - Math.max(r.played, r.best) >= 0.1) lines += `<div class="ins-line"><span class="k">Overlord</span>on ${esc(teamLabel(e.form, r.ov.id))}: ${orderHTML(r.ov.order)}<span class="meta">${pct(r.ov.chance)}</span></div>`;
-      if (r.tags.includes('risky')) lines += `<div class="ins-line"><span class="k">They showed</span>${orderHTML(r.shown.form)}<span class="meta">best answer ${pct(r.shown.best)}, yours ${pct(r.shown.vs)}${r.shown.repeated ? ' · they repeated it' : ''}</span></div>`;
       return `<div class="ins-fight"><div class="ins-head"><b>R${esc(e.round)}</b><span>vs ${esc(e.oppName)}${profTag(e.oppName, true)}</span><span class="pill ${e.won ? 'w' : 'l'}">${e.won ? 'Won' : 'Lost'}</span>${tags}</div>${lines}</div>`;
     }).join('');
-    const list2 = `<section class="card"><div class="card-h"><h2>Fight by fight</h2><span class="aside">newest first · chance = estimated win chance</span></div><div class="stack">${fights}</div></section>`;
+    const list2 = `<section class="card"><div class="card-h"><h2>Fight by fight</h2><span class="aside">newest first · points and win chance are estimates</span></div><div class="stack">${fights}</div></section>`;
     return `<div class="grid2"><div class="stack" style="gap:16px">${head}${tipCard}</div><div class="stack" style="gap:16px">${list2}</div></div>`;
   }
 
@@ -2639,7 +2729,7 @@ details[open] > summary { margin-bottom: 10px; }
       <div class="scroll"><table class="race"><thead><tr><th>Player <span class="meta">(place now)</span></th><th>Top 8</th><th>Record</th><th>Score</th></tr></thead><tbody>
       ${rows.map((o) => `<tr class="${o.i === x.i ? 'me' : ''}"><td><span class="meta">#${o.i + 1}</span> ${esc(short(o.p[0]))}${profTag(o.p[0], true)}</td><td><span class="racebar"><span class="bar"><i style="width:${(o.p[3] * 100).toFixed(1)}%"></i></span><span class="pct">${pct(o.p[3])}</span></span></td><td>${recOf(o.p, played)}</td><td>${scoreOf(o.p)}</td></tr>`).join('')}
       </tbody></table></div>
-      <p class="foot">${R.runs.toLocaleString()} simulated runs of the last ${left} rounds. Each fight uses both players' latest squads and troops, mostly in their usual order. Pairing follows the standings in blocks of 16 places, as it did on days 1–2: in round 9, 87% of top-16 players met another top-16 player. Tested on day 2, starting from the round-8 standings: of the players it gave 75–95%, 87% made the top 8; of those it gave under 5%, 2% did. It expected 78 players from outside a top 16 to break into one, and 77 did. War Leaders' squads count about 3% stronger than listed, as the logged fights between the two professions show. It assumes squads stay as they are and everyone plays every round.${rows.some((o) => estd(o.p)) ? ' ~ marks players outside the top 16: the game only shows their score from the last time they fought a top-16 player, so the rounds since are estimated and can never put them above 16th place.' : ''} Points: a loss scores 66 per enemy troop killed; a win scores 300,000 plus 66 per enemy troop killed and per troop you keep. ${PROF_KEY}</p></section>`;
+      <p class="foot">${R.runs.toLocaleString()} simulated runs of the last ${left} rounds. Each fight uses both players' latest squads and troops, mostly in their usual order. Pairing follows the standings in blocks of 16 places, as it did on days 1–2: in round 9, 87% of top-16 players met another top-16 player. Tested on day 2, starting from the round-8 standings: of the players it gave 75–95%, 78% made the top 8; of those it gave under 5%, none did. It expected 74 players from outside a top 16 to break into one, and 78 did. Every squad fights at its true strength, read off its stat sheet in the battle reports, so listed power is only where it starts. It assumes squads stay as they are and everyone plays every round.${rows.some((o) => estd(o.p)) ? ' ~ marks players outside the top 16: the game only shows their score from the last time they fought a top-16 player, so the rounds since are estimated and can never put them above 16th place.' : ''} Points: a loss scores 66 per enemy troop killed; a win scores 300,000 plus 66 per enemy troop killed and per troop you keep. ${PROF_KEY}</p></section>`;
     return `<div class="grid2"><div class="stack" style="gap:16px">${head}${oppCard}</div><div class="stack" style="gap:16px">${raceCard}</div></div>`;
   }
   // When no order wins: the order that scores the most points, i.e. kills the most of their troops.
@@ -2653,7 +2743,7 @@ details[open] > summary { margin-bottom: 10px; }
     const trMine = pr.myCanon.map((q) => (q.id != null && tmMe[String(q.id)]) || fbMe);
     const trTheirs = pr.theirCanon.map((q) => (q.id != null && tmOpp[String(q.id)]) || fbOpp);
     const st = settings();
-    const M = D.pointsMatrix(pr.myCanon, pr.theirCanon, trMine, trTheirs, { n: 200, sigma: +st.sigma, bonus: +st.bonus, attr: +st.attr || 1.5, ma: E.profMult(pr.prof && pr.prof.me), mb: E.profMult(pr.prof && pr.prof.opp) });
+    const M = D.ordersMatrix(pr.myCanon, pr.theirCanon, trMine, trTheirs, { n: 300, sigma: +st.sigma, bonus: +st.bonus, attr: +st.attr || 1.5, ma: E.profMult(pr.prof && pr.prof.me), mb: E.profMult(pr.prof && pr.prof.opp) });
     const exp = M.mine.map((row) => row.reduce((acc, v, j) => acc + v * pr.p[j], 0));
     return { exp, best: exp.indexOf(Math.max.apply(null, exp)), guessed: !Object.keys(tmMe).length || !Object.keys(tmOpp).length };
   }
@@ -2684,7 +2774,7 @@ details[open] > summary { margin-bottom: 10px; }
     const row = (g, r, i) => {
       const pl = P[key(r[0])], last = pl && pl.entries.length ? pl.entries[pl.entries.length - 1] : null;
       return { g, gi: i, r, name: r[0], k: key(r[0]), score: r[1], wins: Math.round(r[2]), est: !!r[8], al: pl && pl.al ? String(pl.al) : '', pf: pl && PROF[pl.pf] ? pl.pf : '',
-        power: last ? last.form.reduce((acc, q) => acc + (+q.p || 0), 0) : null, adv: i < adv, listed: i < top };
+        power: last ? last.form.reduce((acc, q) => acc + (+q.p || 0), 0) : null, str: last && hasX(last.form) ? effSum(last.form) : null, adv: i < adv, listed: i < top };
     };
     Object.keys(R.groups).sort().forEach((g) => R.groups[g].p.forEach((r, i) => {
       if (i >= top && !r[9]) return;
@@ -2745,8 +2835,8 @@ details[open] > summary { margin-bottom: 10px; }
       const ps = !hasProj ? '' : `<td>${chance(x)}</td><td>${scope === 'proj' ? range(x) : x.r[9] ? `${x.r[9][1]} <span class="meta rng">${range(x)}</span>` : '<span class="meta">–</span>'}</td>`;
       const where = `${x.est ? '~' : ''}${ordinal(x.gi + 1)}`;
       return `${cut}<tr class="${cls}"><td class="n">${first}</td>
-        <td class="who"><button type="button" class="linkbtn" data-act="raceopp" data-name="${esc(x.name)}">${esc(short(x.name))}</button>${x.al ? ` <span class="meta">${esc(x.al)}</span>` : ''}<div class="meta sub">${esc(x.g)} ${where} · ${rec(x)} · ${pts(x)}${x.pf ? ' · ' + PROF[x.pf] : ''}</div></td>
-        <td class="w">${x.pf ? PROF[x.pf] : '<span class="meta">–</span>'}</td><td class="w">${esc(x.g)} <span class="meta">${where}</span></td><td class="w">${rec(x)}</td><td class="${hasProj ? 'w' : ''}">${pts(x)}</td>${ps}<td class="w">${x.power ? x.power.toFixed(0) + 'M' : '–'}</td></tr>`;
+        <td class="who"><button type="button" class="linkbtn" data-act="raceopp" data-name="${esc(x.name)}">${esc(short(x.name))}</button>${x.al ? ` <span class="meta">${esc(x.al)}</span>` : ''}<div class="meta sub">${esc(x.g)} ${where} · ${rec(x)} · ${pts(x)}${x.pf ? ' · ' + PROF[x.pf] : ''}${x.str ? ` · fights like ${x.str.toFixed(0)}M` : ''}</div></td>
+        <td class="w">${x.pf ? PROF[x.pf] : '<span class="meta">–</span>'}</td><td class="w">${esc(x.g)} <span class="meta">${where}</span></td><td class="w">${rec(x)}</td><td class="${hasProj ? 'w' : ''}">${pts(x)}</td>${ps}<td class="w">${x.str ? `<b>${x.str.toFixed(0)}M</b> <span class="meta">${x.power.toFixed(0)}</span>` : x.power ? x.power.toFixed(0) + 'M' : '–'}</td></tr>`;
     }).join('');
     const what = scope === 'seed'
       ? `The top ${adv} of each group advance: ${seeds.length} players in all. Their seed is their place by total score among those ${seeds.length}.`
@@ -2764,9 +2854,9 @@ details[open] > summary { margin-bottom: 10px; }
       </div>`;
     const head2 = scope === 'proj' ? ['Seed', `Top ${adv}`, 'Range'] : [scope === 'seed' ? 'Seed' : '#', `Top ${adv}`, 'Likely seed'];
     const table = list.length
-      ? `<div class="scroll"><table class="stand"><thead><tr><th class="n">${head2[0]}</th><th>Player</th><th class="w">Profession</th><th class="w">Group</th><th class="w">Record</th><th class="${hasProj ? 'w' : ''}">Score</th>${hasProj ? `<th>${head2[1]}</th><th>${head2[2]}</th>` : ''}<th class="w">Power</th></tr></thead><tbody>${body}</tbody></table></div>`
+      ? `<div class="scroll"><table class="stand"><thead><tr><th class="n">${head2[0]}</th><th>Player</th><th class="w">Profession</th><th class="w">Group</th><th class="w">Record</th><th class="${hasProj ? 'w' : ''}">Score</th>${hasProj ? `<th>${head2[1]}</th><th>${head2[2]}</th>` : ''}<th class="w" title="True strength of their three squads, with listed power in grey">Strength</th></tr></thead><tbody>${body}</tbody></table></div>`
       : `<div class="empty">${find ? `No player matches “${esc((S.stFind || '').trim())}”${grp ? ` in group ${esc(grp)}` : ''}.` : 'Nobody to show here.'}</div>`;
-    const foot = `Profession (War Leader or Engineer) is read from each player's latest battle report. The game only publishes current scores for each group's top ${top}, so those are the players with exact numbers. Seeds today show where things stand now and will move every round until round ${R.rounds}.${hasProj ? ` Top ${adv} is the chance of finishing in the group's top ${adv}. Likely seed is the middle result of ${R.runs.toLocaleString()} simulated runs of the last ${R.rounds - played} rounds, with the range it lands in 8 runs out of 10, counted when the player makes the top ${adv}; ~ marks a score estimated for a player outside the top ${top}.` : ''}`;
+    const foot = `Strength is the true strength of a player's three squads, read off their stat sheets in the latest battle report, with listed power in grey. Profession (War Leader or Engineer) is read from each player's latest battle report. The game only publishes current scores for each group's top ${top}, so those are the players with exact numbers. Seeds today show where things stand now and will move every round until round ${R.rounds}.${hasProj ? ` Top ${adv} is the chance of finishing in the group's top ${adv}. Likely seed is the middle result of ${R.runs.toLocaleString()} simulated runs of the last ${R.rounds - played} rounds, with the range it lands in 8 runs out of 10, counted when the player makes the top ${adv}; ~ marks a score estimated for a player outside the top ${top}.` : ''}`;
     const card = `<section class="card">${title(scope === 'seed' ? 'Semi-final seeding today' : scope === 'proj' ? `Likely seeding after round ${R.rounds}` : 'Overall standings', `${grp ? `group ${esc(grp)} · ` : ''}${asOf}`)}
       ${ctl}
       <p class="meta">${what} Tap a name to scout that player.${(() => { const k = list.filter((x) => x.pf === 'W').length, e = list.filter((x) => x.pf === 'E').length; return k + e ? ` In this list: ${k} War ${k === 1 ? 'Leader' : 'Leaders'}, ${plural(e, 'Engineer')}.` : ''; })()}</p>
@@ -2800,8 +2890,8 @@ details[open] > summary { margin-bottom: 10px; }
       ${squads}</section>`;
     const sim = `<section class="card" aria-labelledby="h-sim"><div class="card-h"><h2 id="h-sim">Fight simulator</h2></div>
       <div class="three">
-        <div class="field"><label class="lbl" for="set-bonus">Counter edge, %</label><input id="set-bonus" type="text" inputmode="decimal" value="${+(st.bonus * 100).toFixed(1)}"${ro}><p class="meta">A squad whose type beats its opponent's fights as if it had this much more power.</p></div>
-        <div class="field"><label class="lbl" for="set-sigma">Hidden strength, ± %</label><input id="set-sigma" type="text" inputmode="decimal" value="${+(st.sigma * 100).toFixed(1)}"${ro}><p class="meta">How far real strength can drift from listed power (heroes, gear, skills).</p></div>
+        <div class="field"><label class="lbl" for="set-bonus">Counter edge, %</label><input id="set-bonus" type="text" inputmode="decimal" value="${+(st.bonus2 * 100).toFixed(2)}"${ro}><p class="meta">A squad whose type beats its opponent's fights as if it were this much stronger.</p></div>
+        <div class="field"><label class="lbl" for="set-sigma">Hidden strength, ± %</label><input id="set-sigma" type="text" inputmode="decimal" value="${+(st.sigma2 * 100).toFixed(1)}"${ro}><p class="meta">How far a squad can still drift from its true strength, fight to fight.</p></div>
         <div class="field"><label class="lbl" for="set-sims">Simulations per matchup</label><select id="set-sims"${ro}>${[800, 1500, 3000].map((n) => `<option value="${n}"${+st.sims === n ? ' selected' : ''}>${n.toLocaleString()}</option>`).join('')}</select><p class="meta">More is steadier but slower.</p></div>
       </div>${canAdmin() ? '' : '<p class="meta">These are shared by the whole team. Only the tracker\'s owner can change them.</p>'}</section>`;
     const team = S.store !== 'db' ? '' : `<section class="card" aria-labelledby="h-team"><div class="card-h"><h2 id="h-team">Team</h2></div><div class="prose">
@@ -2820,7 +2910,9 @@ details[open] > summary { margin-bottom: 10px; }
     </section>`;
     const how = `<section class="card" aria-labelledby="h-how"><div class="card-h"><h2 id="h-how">How the tracker works</h2></div><div class="prose">
       <p>Each encounter, both sides send the next squad in line. The winner goes to the back of its line with the troops it has left; the loser is out. The fight ends when one side has no squads left, so it takes 3 to 5 encounters. This rule matched every one of 391 encounters in real battle reports.</p>
-      <p>The simulator plays all 36 pairings of your order against theirs, ${(+st.sims || 1500).toLocaleString()} times each, letting every squad's real strength drift about ${pct(+st.sigma, 1)} from its listed power. A squad whose type beats its opponent's (Tank beats Missile, Missile beats Aircraft, Aircraft beats Tank) fights as if it had ${pct(+st.bonus, 1)} more power. Both numbers were fitted to real encounters: power decides almost everything, and the counter edge is small.</p>
+      <p>Listed power is not strength. Every battle report carries each hero's full stat sheet and where the bonuses come from: research (Hero, Units, Special Forces, the Squad trees, Siege to Seize, Defense Fortifications, the three Masteries, Tactical Weapons), gear, exclusive weapons, decorations, drone and Overlord. The tracker turns that into a <b>true strength</b> for every squad. It was fitted on how many troops the winner kept in 11,259 logged encounters and checked on fights it had not seen: between squads within 8% in listed power it picks the winner about 89% of the time, against about 80% for listed power alone. Gear counts for about twice its listed power; decorations, the drone and the Overlord for less than theirs (an Overlord is worth about half).</p>
+      <p>The simulator plays all 36 pairings of your order against theirs, ${(+st.sims || 1500).toLocaleString()} times each, letting every squad drift about ${pct(+st.sigma2, 1)} from its true strength. A squad whose type beats its opponent's (Tank beats Missile, Missile beats Aircraft, Aircraft beats Tank) fights as if it were ${pct(+st.bonus2, 1)} stronger. The winner of an encounter keeps fewer troops the closer it was, and a squad that has lost half its troops still fights at about three quarters of its strength. With the orders actually played, this calls 96% of the logged fights right.</p>
+      <p>True strength is in the same units as listed power: a squad that fights like 90M does as well as a typical 90M squad in the logged fights. The very biggest accounts come out 10 to 15% below their listed power, because much of their power is decorations, drone and Overlord, which add less in a fight than they add on paper.</p>
       <p>To predict an opponent, the tracker replays their logged fights against seven habits: repeating their last order, leading with their strongest squad, countering the formation they could see, keeping a winning order and changing a losing one, second-guessing, keeping their strong squad (Overlord and best gear) away from its counter in the formation they could see, and picking at random. It learns how much of each habit that player shows. Players with only a few fights lean on how everyone in your log behaves.</p>
       <p>When you meet someone again, they know exactly what you played against them last time. The tracker adds an eighth habit for rematches: replay the order that won, or counter the order that beat them. It learns how often each player does that.</p>
       <p>The call is the order that wins most often against that prediction. The safe mix is the game-theory answer: odds that guarantee a minimum win chance whatever they play, for when you'd rather not be read.</p>
@@ -2937,7 +3029,7 @@ details[open] > summary { margin-bottom: 10px; }
       S.busy = 'cal'; render();
       setTimeout(() => { try { S.cal = E.calibrate(battles(), settings()); } catch (e) { S.cal = null; } S.busy = ''; render(); }, 40);
     }
-    else if (a === 'calapply' && S.cal && canAdmin()) { S.shared.bonus = S.cal.best.bonus; S.shared.sigma = S.cal.best.sigma; if (S.cal.best.attr) S.shared.attr = S.cal.best.attr; saveShared(); render(); }
+    else if (a === 'calapply' && S.cal && canAdmin()) { S.shared.bonus2 = S.cal.best.bonus; S.shared.sigma2 = S.cal.best.sigma; saveShared(); render(); }
     else if (a === 'copy') {
       try { await navigator.clipboard.writeText(exportJSON()); S.copyMsg = 'Copied.'; render(); }
       catch (e) {
@@ -3008,8 +3100,8 @@ details[open] > summary { margin-bottom: 10px; }
     if (t.id === 'f-round') { form().round = t.value; return; }
     if (t.id === 'f-a-name' || t.id === 'f-b-name') { const sd = t.id.charAt(2); form()[sd].name = t.value.trim(); prefillSide(sd); render(); return; }
     if (!canAdmin() && /^set-(bonus|sigma|sims)$/.test(t.id)) { render(); return; }
-    if (t.id === 'set-bonus') { const v = parseFloat(t.value); if (isFinite(v) && v >= 0 && v <= 100) { S.shared.bonus = v / 100; saveShared(); } render(); return; }
-    if (t.id === 'set-sigma') { const v = parseFloat(t.value); if (isFinite(v) && v >= 0.5 && v <= 60) { S.shared.sigma = v / 100; saveShared(); } render(); return; }
+    if (t.id === 'set-bonus') { const v = parseFloat(t.value); if (isFinite(v) && v >= 0 && v <= 100) { S.shared.bonus2 = v / 100; saveShared(); } render(); return; }
+    if (t.id === 'set-sigma') { const v = parseFloat(t.value); if (isFinite(v) && v >= 0.5 && v <= 60) { S.shared.sigma2 = v / 100; saveShared(); } render(); return; }
     if (t.id === 'set-sims') { S.shared.sims = +t.value; saveShared(); render(); return; }
     if (t.id === 'imp') { S.importText = t.value; }
   });
