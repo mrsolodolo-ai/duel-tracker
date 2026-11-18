@@ -309,7 +309,6 @@ details[open] > summary { margin-bottom: 10px; }
     <a href="#opponents" data-view="opponents">Opponents</a>
     <a href="#log" data-view="log">Battle log</a>
     <a href="#patterns" data-view="patterns">Patterns</a>
-    <a href="#setup" data-view="setup">Setup</a>
   </nav>
   <div id="notes"></div>
   <main id="view"></main>
@@ -1526,7 +1525,7 @@ details[open] > summary { margin-bottom: 10px; }
 (() => {
   'use strict';
   const E = window.DuelEngine;
-  const VIEWS = ['next', 'race', 'standings', 'insights', 'opponents', 'log', 'patterns', 'setup'];
+  const VIEWS = ['next', 'race', 'standings', 'insights', 'opponents', 'log', 'patterns'];
   const DEF_SHARED = { me: 'Sammyboy99', bonus: 0.04, sigma: 0.03, attr: 1.5, sims: 1500, bonus2: 0.0315, sigma2: 0.017 }; // bonus2 / sigma2 belong to the strength model; the older bonus / sigma are no longer read
   const DEF_PERSONAL = { me: '', myForm: null };
   const LS_ME = 'lw-duel-tracker-me-v1';
@@ -1820,7 +1819,7 @@ details[open] > summary { margin-bottom: 10px; }
   function memoSel(id, k, build) { const c = SELC[id]; if (c && c.k === k) return c.html; const html = build(); SELC[id] = { k, html }; return html; }
   function meSelect(id) {
     const dm = isDemo(), me = settings().me, meK = key(me);
-    // With only example fights there are no real names to pick, so Setup takes a typed name.
+    // With only example fights there are no real names to pick, so a typed name is used.
     if (dm && id === 'set-me') return `<input id="me-name" type="text" autocomplete="off" spellcheck="false" value="${esc(S.meText != null ? S.meText : baseSettings().me)}" placeholder="Exactly as it appears in battle reports">`;
     const P = fullIndex().players, team = teamAlliance();
     const extra = new Set(EXTRA_MATES.map(key));
@@ -2051,7 +2050,7 @@ details[open] > summary { margin-bottom: 10px; }
     S.lastDemo = demoNow;
     drawChrome();
     let html;
-    try { html = S.bundleState === 'loading' && !S.battles.length && S.view !== 'setup' ? '<div class="empty">Loading fights…</div>' : VIEW[S.view](); }
+    try { html = S.bundleState === 'loading' && !S.battles.length ? '<div class="empty">Loading fights…</div>' : VIEW[S.view](); }
     catch (e) { console.error(e); html = `<div class="empty">This view hit a problem: ${esc(e.message)}</div>`; }
     document.getElementById('view').innerHTML = html;
     if (fid) {
@@ -2114,12 +2113,12 @@ details[open] > summary { margin-bottom: 10px; }
     const latest = pl ? pl.entries[pl.entries.length - 1] : null;
     const mine = myLog(), meName = settings().me, hasLog = ix.battles.length > 0;
     const likely = likelyOpps().filter((x) => key(x.name) !== key(S.opp));
-    const src = isDemo() ? 'example squads' : valid(S.personal.myForm) ? 'entered by hand in <a href="#setup">Setup</a>' : mine ? `from your round ${esc(mine.round)} report` : '';
+    const src = isDemo() ? 'example squads' : valid(S.personal.myForm) ? 'entered by hand' + (mine ? ' · <button type="button" class="linkbtn" data-act="melog">Use my latest battle report</button>' : '') : mine ? `from your round ${esc(mine.round)} report` : '';
     const rx = raceOf(meName);
     const raceLine = rx ? `<p class="meta">Top 8 chance: <b>${pct(rx.r[3])}</b> · #${rx.i + 1} in group ${esc(rx.g)} · <a href="#race">The race</a></p>` : '';
     const meNote = mf ? `<div class="row">${orderHTML(mf)}<span class="meta">${src}</span></div>`
-      : meName ? `<p class="meta">No fights logged under this name yet. Add your squads in <a href="#setup">Setup</a>.</p>`
-      : `<p class="meta">${hasLog ? 'Your squads fill in from your latest battle report.' : 'Or add your squads in Setup.'}</p>`;
+      : meName ? `<p class="meta">No fights are on record under this name yet, so there is nothing to simulate.</p>`
+      : `<p class="meta">${hasLog ? 'Your squads fill in from your latest battle report.' : 'Your squads fill in once battle reports are loaded.'}</p>`;
 
     let opp = `<section class="card c-opp" aria-labelledby="h-opp">
       <div class="card-h"><h2 id="h-opp">Matchup</h2></div>
@@ -2149,7 +2148,7 @@ details[open] > summary { margin-bottom: 10px; }
     }
     opp += '</section>';
 
-    let you = '<section class="card c-you" aria-labelledby="h-you"><div class="card-h"><h2 id="h-you">You</h2><a href="#setup">Edit squads</a></div>';
+    let you = '<section class="card c-you" aria-labelledby="h-you"><div class="card-h"><h2 id="h-you">You</h2></div>';
     let pr = null, waiting = false;
     if (mf) {
       const mc = E.canonical(mf).canon, ds = defaultShown(mf);
@@ -2164,7 +2163,7 @@ details[open] > summary { margin-bottom: 10px; }
       }
     } else {
       you += hasLog && !meName ? '<p>Pick your name under Matchup. Your squads fill in from your latest battle report.</p>'
-        : '<p>Add your three squads in Setup so the tracker can simulate your fights.</p><div><a class="btn primary" href="#setup">Go to Setup</a></div>';
+        : '<p>No fights are on record under this name, so the tracker has nothing to simulate yet. Squads fill in from battle reports.</p>';
     }
     you += '</section>';
 
@@ -2172,7 +2171,7 @@ details[open] > summary { margin-bottom: 10px; }
     if (pr) { const plan = killPlan(pr, pl), kill = pr.ev[pr.best] < 0.1 ? plan : null; byPoints(pr, plan); const ovi = ovSpots(mf, pl); out = (kill ? killCard(pr, kill) : heroCard(pr, plan, ovi)) + ovCard(ovi) + predCard(pr) + scoutCard(pl, pr, mf) + mixCard(pr) + mxCard(pr); }
     else if (waiting) out = '<section class="card hero c-hero"><div class="card-h"><h2>Play this order</h2></div><div class="empty">Working out the call…</div></section>';
     else {
-      const msg = !mf ? (hasLog && !meName ? 'Pick your name to get a call.' : 'Add your squads in Setup to get a call.') : !S.opp ? (S.oppManual ? 'Type their name and formation to get a call.' : 'Pick your opponent to get a call.') : 'Enter type and power for all three of their squads to get a call.';
+      const msg = !mf ? (hasLog && !meName ? 'Pick your name to get a call.' : 'No fights are on record under this name yet.') : !S.opp ? (S.oppManual ? 'Type their name and formation to get a call.' : 'Pick your opponent to get a call.') : 'Enter type and power for all three of their squads to get a call.';
       out = `<section class="card hero c-hero"><div class="card-h"><h2>Play this order</h2></div><div class="empty">${msg}</div></section>`;
     }
     return `<div class="grid-next"><div class="col">${opp}${you}</div><div class="col">${out}</div></div>`;
@@ -2358,7 +2357,7 @@ details[open] > summary { margin-bottom: 10px; }
   function strengthNote(pr) {
     if (pr.hasX && (pr.hasX.me || pr.hasX.opp)) {
       const lst = (c) => c.reduce((n, q) => n + q.p, 0);
-      return `<p class="meta">Chances use true strength, read off every squad's stat sheet in the battle reports, not the listed power on the chips. You fight like <b>${fmtP(effSum(pr.myCanon))}M</b> (${fmtP(lst(pr.myCanon))}M listed), they fight like <b>${fmtP(effSum(pr.theirCanon))}M</b> (${fmtP(lst(pr.theirCanon))}M listed). <a href="#setup">How this is worked out</a></p>`;
+      return `<p class="meta">Chances use true strength, read off every squad's stat sheet in the battle reports, not the listed power on the chips. You fight like <b>${fmtP(effSum(pr.myCanon))}M</b> (${fmtP(lst(pr.myCanon))}M listed), they fight like <b>${fmtP(effSum(pr.theirCanon))}M</b> (${fmtP(lst(pr.theirCanon))}M listed).</p>`;
     }
     return pr.prof && pr.prof.me && pr.prof.opp && pr.prof.me !== pr.prof.opp ? `<p class="meta">${pr.prof.me === 'W' ? 'You are a War Leader and they are an Engineer: your' : 'They are a War Leader and you are an Engineer: their'} squads count about ${Math.round(pr.prof.bonus * 100)}% stronger than listed here.</p>` : '';
   }
@@ -2558,7 +2557,7 @@ details[open] > summary { margin-bottom: 10px; }
         <div>${stat('You kept your previous order', r(ms.kept, ms.withPrev))}${mw && mw.n ? stat('The model would have called your order', pct(mw.acc)) : ''}</div>
         <p class="meta">This is how your opponents' scouting sees you. If you're easy to read, the safe mix on Next fight keeps you hard to counter.</p>`;
     } else {
-      me += `<p>Log at least two of your own fights${baseSettings().me ? '' : ' and set your name in Setup'} to see how predictable you are.</p>`;
+      me += `<p>Log at least two of your own fights${baseSettings().me ? '' : ' and pick your name on Next fight'} to see how predictable you are.</p>`;
     }
     me += '</section>';
     const st2 = settings(), nb = isDemo() ? 0 : S.battles.length;
@@ -2966,62 +2965,7 @@ details[open] > summary { margin-bottom: 10px; }
     return `<div class="stack" style="gap:16px">${head}${card}</div>`;
   }
 
-  /* ---------- Setup ---------- */
-  function exportJSON() {
-    return JSON.stringify(S.battles.map((b) => { const n = E.normBattle(b); return n ? Object.assign({ round: n.round }, n.g ? { g: n.g } : {}, { a: n.a, b: n.b, win: n.win }, n.e ? { e: n.e } : {}) : null; }).filter(Boolean));
-  }
-  function viewSetup() {
-    const st = S.shared, ro = canAdmin() ? '' : ' disabled';
-    const privacy = S.store !== 'db' ? 'Saved in this browser.' : S.personalStore === 'db' ? 'Only you see these. Each teammate sets their own.' : 'Saved in this browser only.';
-    const mine = isDemo() ? null : myLog();
-    let squads;
-    if (mine && !valid(S.personal.myForm)) {
-      squads = `<div class="lbl"><span>Your squads</span><span class="hint">From your round ${esc(mine.round)} battle report</span></div>
-      <div>${orderHTML(mine.form)}</div>
-      <p class="meta">These update by themselves when newer reports are imported. Power changed since then? <button type="button" class="linkbtn" data-act="mehand">Enter squads by hand</button></p>`;
-    } else {
-      const d = draftOf('me');
-      squads = `<div class="lbl"><span>Your squads, in your current order</span><span class="hint">Slot 1 fights first</span></div>
-      ${slots('me', d)}
-      <p class="meta">${valid(d) ? 'Saved.' : 'Enter type and power for all three squads.'} Use each squad's power as the game shows it (hero power, without troops), and update it after you re-save your duel formation.${mine ? ' <button type="button" class="linkbtn" data-act="melog">Use my latest battle report instead</button>' : ''}</p>`;
-    }
-    const you = `<section class="card" aria-labelledby="h-me"><div class="card-h"><h2 id="h-me">You</h2><span class="aside">${privacy}</span></div>
-      <div class="field"><label class="lbl" for="${isDemo() ? 'me-name' : 'set-me'}">Your name in the duel</label>${meSelect('set-me')}
-        <p class="meta">Battles under this name count as yours, so the tracker knows what opponents have seen of you.</p></div>
-      ${squads}</section>`;
-    const sim = `<section class="card" aria-labelledby="h-sim"><div class="card-h"><h2 id="h-sim">Fight simulator</h2></div>
-      <div class="three">
-        <div class="field"><label class="lbl" for="set-bonus">Counter edge, %</label><input id="set-bonus" type="text" inputmode="decimal" value="${+(st.bonus2 * 100).toFixed(2)}"${ro}><p class="meta">A squad whose type beats its opponent's fights as if it were this much stronger. Strength is steep: 3% of strength is about +29% in damage terms, and at equal strength the countering squad won 218 of 239 logged encounters.</p></div>
-        <div class="field"><label class="lbl" for="set-sigma">Hidden strength, ± %</label><input id="set-sigma" type="text" inputmode="decimal" value="${+(st.sigma2 * 100).toFixed(1)}"${ro}><p class="meta">How far a squad can still drift from its true strength, fight to fight.</p></div>
-        <div class="field"><label class="lbl" for="set-sims">Simulations per matchup</label><select id="set-sims"${ro}>${[800, 1500, 3000].map((n) => `<option value="${n}"${+st.sims === n ? ' selected' : ''}>${n.toLocaleString()}</option>`).join('')}</select><p class="meta">More is steadier but slower.</p></div>
-      </div>${canAdmin() ? '' : '<p class="meta">These are shared by the whole team. Only the tracker\'s owner can change them.</p>'}</section>`;
-    const team = S.store !== 'db' ? '' : `<section class="card" aria-labelledby="h-team"><div class="card-h"><h2 id="h-team">Team</h2></div><div class="prose">
-      <p>Everyone you share this page with sees the same battle log and opponent profiles. ${S.bundle.length ? `Battle reports from all ${groupInfo().roots.length} qualifier groups are built in, so most players can find their own name. ` : ''}Each teammate picks their own name once on Next fight, and their squads fill in from their latest battle report. Names stay private to each person, so everyone gets calls for their own fights.</p>
-      ${S.isOwner ? '<p>To add teammates, use Share on this page in claude.ai. Give them Contributor access so they can add battle reports and keep their name saved wherever they open the page. Viewers can scout too, but their name is saved in their browser only and they can\'t add reports.</p>'
-        : canAdd() ? '<p>You can add battle reports to the shared log. Only the owner can delete battles or change the fight simulator.</p>'
-        : '<p>You have view access: you can scout, your name is saved in this browser only, and you can\'t add reports. Ask the owner for Contributor access to add reports.</p>'}</div></section>`;
-    const data = `<section class="card" aria-labelledby="h-data"><div class="card-h"><h2 id="h-data">Data</h2><span class="aside">${plural(S.battles.length, 'battle')} logged here${S.bundle.length ? `, ${S.bundle.length.toLocaleString()} from reports` : ''}</span></div>
-      <div class="field"><span class="lbl">Export</span>
-        <div class="row"><button type="button" class="btn" data-act="copy">Copy all battles</button>${S.showExport ? '' : '<button type="button" class="btn" data-act="showexp">Show</button>'}<span class="meta" role="status">${esc(S.copyMsg)}</span></div>
-        ${S.showExport ? `<textarea id="exp" readonly aria-label="Exported battles">${esc(exportJSON())}</textarea>` : ''}</div>
-      <div class="field"><label class="lbl" for="imp">Import battles</label><textarea id="imp" placeholder='[{"round":3,"a":{"name":"Kestrel","s":[{"t":"T","p":48.2},{"t":"A","p":45.1},{"t":"M","p":40.3}]},"b":{"name":"Odin","s":[{"t":"A","p":50.0},{"t":"M","p":44.2},{"t":"T","p":39.8}]},"win":"a"}]'>${esc(S.importText)}</textarea>
-        <div class="row"><button type="button" class="btn primary" data-act="import"${S.busy ? ' disabled' : ''}>${S.busy === 'import' ? 'Importing…' : 'Import'}</button><span class="meta" role="status">${esc(S.importMsg)}</span></div>
-        <p class="meta">Paste a list of battles in the format above. Battles already logged are skipped.</p></div>
-      <div class="row">${S.wipe ? `<span>Delete all ${plural(S.battles.length, 'battle')}? This can't be undone.</span><button type="button" class="btn danger" data-act="wipe2"${S.busy ? ' disabled' : ''}>Delete everything</button><button type="button" class="btn" data-act="wipe0">Keep them</button>` : `${canAdmin() ? `<button type="button" class="btn danger" data-act="wipe1"${S.battles.length ? '' : ' disabled'}>Delete all battles</button>` : ''}`}</div>
-    </section>`;
-    const how = `<section class="card" aria-labelledby="h-how"><div class="card-h"><h2 id="h-how">How the tracker works</h2></div><div class="prose">
-      <p>Each encounter, both sides send the next squad in line. The winner goes to the back of its line with the troops it has left; the loser is out. The fight ends when one side has no squads left, so it takes 3 to 5 encounters. This rule matched every one of 391 encounters in real battle reports.</p>
-      <p>Listed power is not strength. Every battle report carries each hero's full stat sheet and where the bonuses come from: research (Hero, Units, Special Forces, the Squad trees, Siege to Seize, Defense Fortifications, the three Masteries, Tactical Weapons), gear, exclusive weapons, decorations, drone and Overlord. The tracker turns that into a <b>true strength</b> for every squad. It was fitted on how many troops the winner kept in 11,259 logged encounters and checked on fights it had not seen: between squads within 8% in listed power it picks the winner about 89% of the time, against about 80% for listed power alone. Gear counts for about twice its listed power; decorations, the drone and the Overlord for less than theirs (an Overlord is worth about half).</p>
-      <p>The simulator plays all 36 pairings of your order against theirs, ${(+st.sims || 1500).toLocaleString()} times each, letting every squad drift about ${pct(+st.sigma2, 1)} from its true strength. A squad whose type beats its opponent's (Tank beats Missile, Missile beats Aircraft, Aircraft beats Tank) fights as if it were ${pct(+st.bonus2, 1)} stronger. That is a big edge: when two squads of equal true strength met in the reports, the countering one won 218 of 239 times and kept about a third of its troops, and in damage terms it comes to about +29%. The winner of an encounter keeps fewer troops the closer it was, and a squad that has lost half its troops still fights at about three quarters of its strength. With the orders actually played, this calls 96% of the logged fights right.</p>
-      <p>True strength is in the same units as listed power: a squad that fights like 90M does as well as a typical 90M squad in the logged fights. The very biggest accounts come out 10 to 15% below their listed power, because much of their power is decorations, drone and Overlord, which add less in a fight than they add on paper.</p>
-      <p>To predict an opponent, the tracker replays their logged fights against seven habits: repeating their last order, leading with their strongest squad, countering the formation they could see, keeping a winning order and changing a losing one, second-guessing, keeping their strong squad (Overlord and best gear) away from its counter in the formation they could see, and picking at random. It learns how much of each habit that player shows. Players with only a few fights lean on how everyone in your log behaves.</p>
-      <p>When you meet someone again, they know exactly what you played against them last time. The tracker adds an eighth habit for rematches: replay the order that won, or counter the order that beat them. It learns how often each player does that.</p>
-      <p>The call is the order that wins most often against that prediction. The safe mix is the game-theory answer: odds that guarantee a minimum win chance whatever they play, for when you'd rather not be read.</p>
-      <p>Anyone with Contributor access can log battle reports here, and the owner can ask Claude to import whole groups straight from the duel's battle reports.</p></div></section>`;
-    return `<div class="grid2"><div class="stack" style="gap:16px">${you}${team}${sim}</div><div class="stack" style="gap:16px">${data}${how}</div></div>`;
-  }
-
-  const VIEW = { next: viewNext, race: viewRace, standings: viewStandings, insights: viewInsights, opponents: viewOpponents, log: viewLog, patterns: viewPatterns, setup: viewSetup };
+  const VIEW = { next: viewNext, race: viewRace, standings: viewStandings, insights: viewInsights, opponents: viewOpponents, log: viewLog, patterns: viewPatterns };
 
   /* ---------- actions ---------- */
   async function saveForm() {
@@ -3093,7 +3037,7 @@ details[open] > summary { margin-bottom: 10px; }
     const el = ev.target.closest('[data-act]');
     if (!el) return;
     const a = el.dataset.act;
-    if (a === 'real') { S.forceReal = true; location.hash = '#setup'; render(); }
+    if (a === 'real') { S.forceReal = true; location.hash = '#next'; render(); }
     else if (a === 'dismiss') { S.note = ''; S.noteErr = false; render(); }
     else if (a === 'opp') { setOpp(el.dataset.name); S.oppOpen = false; render(); }
     else if (a === 'raceopp') { setOpp(el.dataset.name); S.oppOpen = false; if (location.hash !== '#next') location.hash = 'next'; else render(); }
@@ -3131,18 +3075,6 @@ details[open] > summary { margin-bottom: 10px; }
       setTimeout(() => { try { S.cal = E.calibrate(battles(), settings()); } catch (e) { S.cal = null; } S.busy = ''; render(); }, 40);
     }
     else if (a === 'calapply' && S.cal && canAdmin()) { S.shared.bonus2 = S.cal.best.bonus; S.shared.sigma2 = S.cal.best.sigma; saveShared(); render(); }
-    else if (a === 'copy') {
-      try { await navigator.clipboard.writeText(exportJSON()); S.copyMsg = 'Copied.'; render(); }
-      catch (e) {
-        S.showExport = true; S.copyMsg = 'Copying was blocked. The text is selected, so copy it yourself.'; render();
-        setTimeout(() => { const t = document.getElementById('exp'); if (t) { t.focus(); t.select(); } }, 80);
-      }
-    }
-    else if (a === 'import') { doImport(); }
-    else if (a === 'showexp') { S.showExport = true; render(); }
-    else if (a === 'wipe1') { S.wipe = 1; render(); }
-    else if (a === 'wipe0') { S.wipe = 0; render(); }
-    else if (a === 'wipe2' && canAdmin()) { wipeAll(); }
   });
 
   const isPick = (ev) => ev.inputType === 'insertReplacementText' || ev.inputType == null;
@@ -3162,7 +3094,6 @@ details[open] > summary { margin-bottom: 10px; }
       return;
     }
     if (t.id === 'me-name') { S.meText = t.value; return; }
-    if (t.id === 'imp') { S.importText = t.value; }
   });
   document.addEventListener('change', (ev) => {
     const t = ev.target;
@@ -3204,7 +3135,6 @@ details[open] > summary { margin-bottom: 10px; }
     if (t.id === 'set-bonus') { const v = parseFloat(t.value); if (isFinite(v) && v >= 0 && v <= 100) { S.shared.bonus2 = v / 100; saveShared(); } render(); return; }
     if (t.id === 'set-sigma') { const v = parseFloat(t.value); if (isFinite(v) && v >= 0.5 && v <= 60) { S.shared.sigma2 = v / 100; saveShared(); } render(); return; }
     if (t.id === 'set-sims') { S.shared.sims = +t.value; saveShared(); render(); return; }
-    if (t.id === 'imp') { S.importText = t.value; }
   });
 
   /* ---------- battle reports shipped with the page ---------- */
