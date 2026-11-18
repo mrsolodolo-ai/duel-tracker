@@ -110,6 +110,9 @@ table.stand .sub { display: none; }
   table.stand .rng { display: block; }
   .st-ctl .seg button { padding: 6px 7px; }
 }
+.pf { font-family: var(--cond); font-weight: 700; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; white-space: nowrap; color: var(--muted); vertical-align: 1px; }
+.pf-W { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+.card-h h2 .pf { letter-spacing: .06em; }
 .tip-list { margin: 4px 0 0; padding-left: 18px; font-size: 14px; display: flex; flex-direction: column; gap: 4px; }
 .tip-rows { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .tip-row { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; }
@@ -396,6 +399,8 @@ details[open] > summary { margin-bottom: 10px; }
     var o = { name: name, s: squads };
     if (x.al != null && String(x.al).trim()) o.al = String(x.al).trim();
     if (x.sv != null && isFinite(+x.sv)) o.sv = +x.sv;
+    // Profession, from the battle report's raw data (user field 9: 101 Engineer, 102 War Leader): "E" or "W".
+    if (x.pf === 'W' || x.pf === 'E') o.pf = x.pf;
     // From battle reports: which team carried the Overlord (ov) and how much power it adds (op, millions; exact:
     // its base value plus the power of the troops it brings), mythic (m6, 5-star) and UR (ur, 0-4 star) gear pieces per squad
     // in slot order, gear power per squad (gp, millions; counts every piece's level and stars), and the type bonus per
@@ -723,6 +728,7 @@ details[open] > summary { margin-bottom: 10px; }
         if (b.g) P.g = b.g;
         if (me.al) P.al = me.al;
         if (me.sv != null) P.sv = me.sv;
+        if (me.pf) P.pf = me.pf;
         players[k].entries.push({ round: b.round, form: me.s, oppKey: keyOf(op.name), oppName: op.name, oppForm: op.s, won: b.win === side, battleId: b.id, ex: extrasOf(me), oppEx: extrasOf(op), enc: b.e || null, side: side });
       });
     });
@@ -1424,6 +1430,11 @@ details[open] > summary { margin-bottom: 10px; }
   const clone = (f) => f.map((q) => (q.id != null ? { t: q.t, p: q.p, id: q.id } : { t: q.t, p: q.p }));
   const valid = (f) => (f ? E.normSquads(f) : null);
   const short = (n) => (n.length > 20 ? n.slice(0, 19) + '…' : n);
+  // Profession of a player (War Leader or Engineer), read from their latest battle report.
+  const PROF = { W: 'War Leader', E: 'Engineer' }, PROF_SHORT = { W: 'WL', E: 'ENG' };
+  const profOf = (name) => { const pl = name ? fullIndex().players[key(name)] : null; return pl && PROF[pl.pf] ? pl.pf : ''; };
+  const profTag = (name, brief) => { const c = profOf(name); return c ? ` <span class="pf pf-${c}" title="${PROF[c]}">${brief ? PROF_SHORT[c] : PROF[c]}</span>` : ''; };
+  const PROF_KEY = 'WL = War Leader, ENG = Engineer, from each player\'s latest battle report.';
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : (/(ch|sh|s|x)$/.test(w) ? 'es' : 's')}`;
   const NAME_COLL = typeof Intl !== 'undefined' && Intl.Collator ? new Intl.Collator(undefined, { sensitivity: 'base' }) : null;
   const byName = (x, y) => (NAME_COLL ? NAME_COLL.compare(x, y) : x.localeCompare(y)) || (x < y ? -1 : x > y ? 1 : 0);
@@ -2057,6 +2068,7 @@ details[open] > summary { margin-bottom: 10px; }
   function keyFacts(pl) {
     if (!pl || !pl.entries.length) return '';
     const es = pl.entries, n = es.length, facts = [];
+    if (PROF[pl.pf]) facts.push({ t: PROF[pl.pf], hot: false });
     const wins = es.filter((e) => e.won).length;
     const canon = E.canonical(es[n - 1].form).canon, perms = es.map((e) => E.matchPerm(e.form, canon));
     const sameAll = n >= 3 && new Set(perms).size === 1;
@@ -2095,6 +2107,7 @@ details[open] > summary { margin-bottom: 10px; }
     const h = habitsOf(pl);
     if (!h) return '';
     const tl = (id) => esc(teamLabel(h.last.form, id)), rows = [];
+    if (PROF[pl.pf]) rows.push(stat('Profession', PROF[pl.pf]));
     if (h.tbs.length) {
       const [t1, v1] = h.tbs[0], second = h.tbs[1];
       rows.push(stat('Main type <span class="meta">(highest type bonus)</span>', second && v1 - second[1] < 0.03
@@ -2201,18 +2214,19 @@ details[open] > summary { margin-bottom: 10px; }
     const scored = calls.filter(Boolean), hits = scored.filter((c) => c.hit).length;
     const latest = p.entries[p.entries.length - 1];
     const left = `<section class="card"><div class="card-h"><h2>Opponents</h2><span class="aside">${list.length}</span></div>
-      <div class="plist">${list.map((q) => `<button type="button" data-act="sel" data-k="${esc(q.key)}" aria-current="${q.key === sk}"><span class="nm"><span>${esc(q.name)}</span><span class="meta">${q.w}–${q.n - q.w}</span></span><span class="row">${minis(q.last.form)}<span class="meta">${E.EXPERT_INFO[topTendency(m.playerW[q.key])].label}</span></span></button>`).join('')}</div></section>`;
+      <div class="plist">${list.map((q) => `<button type="button" data-act="sel" data-k="${esc(q.key)}" aria-current="${q.key === sk}"><span class="nm"><span>${esc(q.name)}${profTag(q.name, true)}</span><span class="meta">${q.w}–${q.n - q.w}</span></span><span class="row">${minis(q.last.form)}<span class="meta">${E.EXPERT_INFO[topTendency(m.playerW[q.key])].label}</span></span></button>`).join('')}</div></section>`;
     const rows = p.entries.map((e, t) => ({ e, t })).reverse().map(({ e, t }) => {
       const o = obs[t], c = calls[t];
       const call = c ? (c.hit ? '<span class="ok">Right</span>' : `<span class="bad">Missed</span> ${minis(E.orderSquads(o.canon, c.top))}`) : '<span class="meta">First fight</span>';
-      return `<tr><td class="num">${esc(e.round)}</td><td>${orderHTML(e.form)}</td><td>${esc(e.oppName)}${o.rm ? ' <span class="tag">Rematch</span>' : ''}</td><td>${o.seen.proxy ? '<span class="meta" title="Their opponent’s earlier fight isn’t logged, so this shows what that opponent played here">~</span> ' : ''}${minis(o.seen.lastForm)}</td><td>${e.won ? '<span class="pill w">Won</span>' : '<span class="pill l">Lost</span>'}</td><td>${call}</td></tr>`;
+      return `<tr><td class="num">${esc(e.round)}</td><td>${orderHTML(e.form)}</td><td>${esc(e.oppName)}${profTag(e.oppName, true)}${o.rm ? ' <span class="tag">Rematch</span>' : ''}</td><td>${o.seen.proxy ? '<span class="meta" title="Their opponent’s earlier fight isn’t logged, so this shows what that opponent played here">~</span> ' : ''}${minis(o.seen.lastForm)}</td><td>${e.won ? '<span class="pill w">Won</span>' : '<span class="pill l">Lost</span>'}</td><td>${call}</td></tr>`;
     }).join('');
-    const right = `<section class="card"><div class="card-h"><h2>${esc(p.name)}</h2><button type="button" class="btn small primary" data-act="scout" data-name="${esc(p.name)}">Scout as next opponent</button></div>
+    const right = `<section class="card"><div class="card-h"><h2>${esc(p.name)}${profTag(p.name)}</h2><button type="button" class="btn small primary" data-act="scout" data-name="${esc(p.name)}">Scout as next opponent</button></div>
       <div class="row"><span class="lbl">Latest order</span>${orderHTML(latest.form)}</div>
       <div class="lbl"><span>How they decide</span><span class="hint">${scored.length ? `Model called ${hits} of ${scored.length} of their fights right` : 'Needs two fights to test the model'}</span></div>
       <div class="stack">${tendRows(w)}</div>
       ${m.playerRm[sk].n ? `<p class="meta">In ${plural(m.playerRm[sk].n, 'rematch')}, the model puts ${pct(m.playerRm[sk].r)} weight on them remembering the last meeting (replaying what won, or countering what beat them).</p>` : ''}
       <div class="scroll"><table><thead><tr><th>Round</th><th>Played</th><th>Against</th><th>They could see</th><th>Result</th><th>Model's call</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <p class="meta">${PROF_KEY}</p>
       <p class="meta">"They could see" is their opponent's formation from the round before. A ~ means that fight isn't logged, so it shows what the opponent played in this one. Each call uses only fights logged before it.</p>
     </section>`;
     return `<div class="grid-opp">${left}${right}</div>`;
@@ -2262,7 +2276,7 @@ details[open] > summary { margin-bottom: 10px; }
           ? `<span class="row"><button type="button" class="btn small danger" data-act="del" data-id="${esc(b.id)}">Delete</button><button type="button" class="btn small" data-act="nodel">Keep</button></span>`
           : `<button type="button" class="btn small" data-act="askdel" data-id="${esc(b.id)}" aria-label="Delete round ${esc(n.round)}, ${esc(n.a.name)} against ${esc(n.b.name)}">Delete</button>`;
       }
-      const who = (sd) => `<div class="who"><span class="nm">${esc(n[sd].name)}</span>${n.win === sd ? '<span class="pill w">Won</span>' : ''}${orderHTML(n[sd].s)}</div>`;
+      const who = (sd) => `<div class="who"><span class="nm">${esc(n[sd].name)}${profTag(n[sd].name, true)}</span>${n.win === sd ? '<span class="pill w">Won</span>' : ''}${orderHTML(n[sd].s)}</div>`;
       return `<div class="b"><span class="rd" title="Round">${esc(n.round)}</span><div class="vs">${who('a')}${who('b')}</div>${del}</div>`;
     }).join('');
     const logCard = `<section class="card" aria-labelledby="h-list"><div class="card-h"><h2 id="h-list">Battles</h2><span class="row"><span class="aside">${list.length.toLocaleString()}${scoped ? ' in ' + esc(groupName(G, myR)) : ''}</span>${G.roots.length > 1 && myR ? `<button type="button" class="btn small" data-act="logall">${S.logAll ? 'Only my group' : 'All groups'}</button>` : ''}</span></div>
@@ -2521,6 +2535,7 @@ details[open] > summary { margin-bottom: 10px; }
     const rows = INS.v, tips = insightTips(pl, rows), h = habitsOf(pl);
     const wins = rows.filter((r) => r.e.won).length;
     const facts = [stat('Record', `${wins}–${rows.length - wins}`)];
+    if (PROF[pl.pf]) facts.push(stat('Profession', PROF[pl.pf]));
     if (h) {
       if (h.tbs.length) facts.push(stat('Main type <span class="meta">(highest type bonus)</span>', h.tbs.length > 1 && h.tbs[0][1] - h.tbs[1][1] < 0.03 ? 'Balanced' : E.TYPE_NAME[h.tbs[0][0]]));
       if (h.ov) facts.push(stat('Overlord', `${esc(teamLabel(h.last.form, h.ov))}${h.ovMoves ? ' · moved ' + plural(h.ovMoves, 'time') : ''}`));
@@ -2537,7 +2552,7 @@ details[open] > summary { margin-bottom: 10px; }
       if (r.best - r.played >= 0.1) lines += `<div class="ins-line"><span class="k">Best order</span>${orderHTML(r.bestOrder)}<span class="meta">${pct(r.best)}</span></div>`;
       if (r.ov && r.ov.chance - Math.max(r.played, r.best) >= 0.1) lines += `<div class="ins-line"><span class="k">Overlord</span>on ${esc(teamLabel(e.form, r.ov.id))}: ${orderHTML(r.ov.order)}<span class="meta">${pct(r.ov.chance)}</span></div>`;
       if (r.tags.includes('risky')) lines += `<div class="ins-line"><span class="k">They showed</span>${orderHTML(r.shown.form)}<span class="meta">best answer ${pct(r.shown.best)}, yours ${pct(r.shown.vs)}${r.shown.repeated ? ' · they repeated it' : ''}</span></div>`;
-      return `<div class="ins-fight"><div class="ins-head"><b>R${esc(e.round)}</b><span>vs ${esc(e.oppName)}</span><span class="pill ${e.won ? 'w' : 'l'}">${e.won ? 'Won' : 'Lost'}</span>${tags}</div>${lines}</div>`;
+      return `<div class="ins-fight"><div class="ins-head"><b>R${esc(e.round)}</b><span>vs ${esc(e.oppName)}${profTag(e.oppName, true)}</span><span class="pill ${e.won ? 'w' : 'l'}">${e.won ? 'Won' : 'Lost'}</span>${tags}</div>${lines}</div>`;
     }).join('');
     const list2 = `<section class="card"><div class="card-h"><h2>Fight by fight</h2><span class="aside">newest first · chance = estimated win chance</span></div><div class="stack">${fights}</div></section>`;
     return `<div class="grid2"><div class="stack" style="gap:16px">${head}${tipCard}</div><div class="stack" style="gap:16px">${list2}</div></div>`;
@@ -2595,13 +2610,13 @@ details[open] > summary { margin-bottom: 10px; }
     }
     const head = `<section class="card">${title(`group ${esc(g)} · ${asOf}`)}
       <div class="big-row"><span class="big-num">${pct(chance)}</span><span class="cap">chance ${esc(r[0])} finishes in the top 8 of group ${esc(g)}</span></div>
-      <div>${stat('Now', `${estd(r) ? 'about ' : ''}#${x.i + 1} in the group · ${scoreOf(r)} · ${recOf(r, played)}`)}${stat('Rounds left', `${left}, 8 a day`)}</div>
+      <div>${stat('Now', `${estd(r) ? 'about ' : ''}#${x.i + 1} in the group · ${scoreOf(r)} · ${recOf(r, played)}`)}${profOf(r[0]) ? stat('Profession', PROF[profOf(r[0])]) : ''}${stat('Rounds left', `${left}, 8 a day`)}</div>
       <p>${verdict}</p>${estd(r) ? `<p class="meta">The game only shows current scores for a group's top 16. Your score here is what you had the last time you fought one of them, plus an estimate for the ${plural(r[8], 'round')} since.</p>` : ''}</section>`;
     const opps = r[7].slice().sort((a, b) => b[1] - a[1]);
     const keyN = opps.filter((o) => o[3] >= 0.35 && o[3] < 0.65).length, killN = opps.filter((o) => o[3] < 0.1).length;
     const oppRows = opps.map(([j, md, mn, pw]) => {
       const o = G.p[j], tg = raceTag(pw);
-      return `<tr class="${tg[0] === 'warn' ? 'key' : ''}"><td><button type="button" class="linkbtn" data-act="raceopp" data-name="${esc(o[0])}">${esc(short(o[0]))}</button> <span class="meta">${recOf(o, played)}</span><div><span class="tag ${tg[0]}">${tg[1]}</span></div></td><td>${pct(mn)}</td><td>${md.toFixed(1)}</td><td><b>${pct(pw)}</b></td></tr>`;
+      return `<tr class="${tg[0] === 'warn' ? 'key' : ''}"><td><button type="button" class="linkbtn" data-act="raceopp" data-name="${esc(o[0])}">${esc(short(o[0]))}</button>${profTag(o[0], true)} <span class="meta">${recOf(o, played)}</span><div><span class="tag ${tg[0]}">${tg[1]}</span></div></td><td>${pct(mn)}</td><td>${md.toFixed(1)}</td><td><b>${pct(pw)}</b></td></tr>`;
     }).join('');
     const oppCard = `<section class="card"><div class="card-h"><h2>Next 8 rounds</h2><span class="aside">who you'll likely meet</span></div>
       <p class="meta">${keyN ? `${plural(keyN, 'key match')} (about even): these decide your top 8. ` : ''}${killN ? `${killN === 1 ? 'One of them is' : killN + ' of them are'} out of reach, so play for kills there: Next fight shows the order that kills the most. ` : ''}Tap a name for the call.</p>
@@ -2610,9 +2625,9 @@ details[open] > summary { margin-bottom: 10px; }
     const rows = G.p.map((p, i) => ({ p, i })).filter((o) => o.p[3] >= 0.01 || o.i < 12 || o.i === x.i).sort((a, b) => b.p[3] - a.p[3] || a.i - b.i);
     const raceCard = `<section class="card"><div class="card-h"><h2>Group ${esc(g)} race</h2><span class="aside">top 8 advance</span></div>
       <div class="scroll"><table class="race"><thead><tr><th>Player <span class="meta">(place now)</span></th><th>Top 8</th><th>Record</th><th>Score</th></tr></thead><tbody>
-      ${rows.map((o) => `<tr class="${o.i === x.i ? 'me' : ''}"><td><span class="meta">#${o.i + 1}</span> ${esc(short(o.p[0]))}</td><td><span class="racebar"><span class="bar"><i style="width:${(o.p[3] * 100).toFixed(1)}%"></i></span><span class="pct">${pct(o.p[3])}</span></span></td><td>${recOf(o.p, played)}</td><td>${scoreOf(o.p)}</td></tr>`).join('')}
+      ${rows.map((o) => `<tr class="${o.i === x.i ? 'me' : ''}"><td><span class="meta">#${o.i + 1}</span> ${esc(short(o.p[0]))}${profTag(o.p[0], true)}</td><td><span class="racebar"><span class="bar"><i style="width:${(o.p[3] * 100).toFixed(1)}%"></i></span><span class="pct">${pct(o.p[3])}</span></span></td><td>${recOf(o.p, played)}</td><td>${scoreOf(o.p)}</td></tr>`).join('')}
       </tbody></table></div>
-      <p class="foot">${R.runs.toLocaleString()} simulated runs of the last ${left} rounds. Each fight uses both players' latest squads and troops, mostly in their usual order. Pairing follows the standings in blocks of 16 places, as it did on days 1–2: in round 9, 87% of top-16 players met another top-16 player. Tested on day 2, starting from the round-8 standings: of the players it gave 75–95%, 87% made the top 8; of those it gave under 5%, 2% did. It expected 78 players from outside a top 16 to break into one, and 77 did. It assumes squads stay as they are and everyone plays every round.${rows.some((o) => estd(o.p)) ? ' ~ marks players outside the top 16: the game only shows their score from the last time they fought a top-16 player, so the rounds since are estimated and can never put them above 16th place.' : ''} Points: a loss scores 66 per enemy troop killed; a win scores 300,000 plus 66 per enemy troop killed and per troop you keep.</p></section>`;
+      <p class="foot">${R.runs.toLocaleString()} simulated runs of the last ${left} rounds. Each fight uses both players' latest squads and troops, mostly in their usual order. Pairing follows the standings in blocks of 16 places, as it did on days 1–2: in round 9, 87% of top-16 players met another top-16 player. Tested on day 2, starting from the round-8 standings: of the players it gave 75–95%, 87% made the top 8; of those it gave under 5%, 2% did. It expected 78 players from outside a top 16 to break into one, and 77 did. It assumes squads stay as they are and everyone plays every round.${rows.some((o) => estd(o.p)) ? ' ~ marks players outside the top 16: the game only shows their score from the last time they fought a top-16 player, so the rounds since are estimated and can never put them above 16th place.' : ''} Points: a loss scores 66 per enemy troop killed; a win scores 300,000 plus 66 per enemy troop killed and per troop you keep. ${PROF_KEY}</p></section>`;
     return `<div class="grid2"><div class="stack" style="gap:16px">${head}${oppCard}</div><div class="stack" style="gap:16px">${raceCard}</div></div>`;
   }
   // When no order wins: the order that scores the most points, i.e. kills the most of their troops.
@@ -2656,7 +2671,7 @@ details[open] > summary { margin-bottom: 10px; }
     const top = R.top || 16, adv = R.advance || 8, rows = [], proj = [];
     const row = (g, r, i) => {
       const pl = P[key(r[0])], last = pl && pl.entries.length ? pl.entries[pl.entries.length - 1] : null;
-      return { g, gi: i, r, name: r[0], k: key(r[0]), score: r[1], wins: Math.round(r[2]), est: !!r[8], al: pl && pl.al ? String(pl.al) : '',
+      return { g, gi: i, r, name: r[0], k: key(r[0]), score: r[1], wins: Math.round(r[2]), est: !!r[8], al: pl && pl.al ? String(pl.al) : '', pf: pl && PROF[pl.pf] ? pl.pf : '',
         power: last ? last.form.reduce((acc, q) => acc + (+q.p || 0), 0) : null, adv: i < adv, listed: i < top };
     };
     Object.keys(R.groups).sort().forEach((g) => R.groups[g].p.forEach((r, i) => {
@@ -2708,8 +2723,8 @@ details[open] > summary { margin-bottom: 10px; }
 
     // The list
     let list = (scope === 'proj' ? C.proj : all).filter((x) => (scope !== 'seed' || x.adv) && (!grp || x.g === grp));
-    if (find) list = list.filter((x) => x.name.toLowerCase().indexOf(find) >= 0 || x.al.toLowerCase().indexOf(find) >= 0);
-    const cols = 6 + (hasProj ? 2 : 0);
+    if (find) list = list.filter((x) => x.name.toLowerCase().indexOf(find) >= 0 || x.al.toLowerCase().indexOf(find) >= 0 || (x.pf && PROF[x.pf].toLowerCase().indexOf(find) === 0));
+    const cols = 7 + (hasProj ? 2 : 0);
     const body = list.map((x) => {
       const grey = scope === 'proj' ? x.r[3] < 0.5 : !x.adv;
       const cls = [x.k === meK ? 'me' : '', (x.al && x.al === team) || extra.has(x.k) ? 'mate' : '', grey ? 'out' : ''].filter(Boolean).join(' ');
@@ -2718,8 +2733,8 @@ details[open] > summary { margin-bottom: 10px; }
       const ps = !hasProj ? '' : `<td>${chance(x)}</td><td>${scope === 'proj' ? range(x) : x.r[9] ? `${x.r[9][1]} <span class="meta rng">${range(x)}</span>` : '<span class="meta">–</span>'}</td>`;
       const where = `${x.est ? '~' : ''}${ordinal(x.gi + 1)}`;
       return `${cut}<tr class="${cls}"><td class="n">${first}</td>
-        <td class="who"><button type="button" class="linkbtn" data-act="raceopp" data-name="${esc(x.name)}">${esc(short(x.name))}</button>${x.al ? ` <span class="meta">${esc(x.al)}</span>` : ''}<div class="meta sub">${esc(x.g)} ${where} · ${rec(x)} · ${pts(x)}</div></td>
-        <td class="w">${esc(x.g)} <span class="meta">${where}</span></td><td class="w">${rec(x)}</td><td class="${hasProj ? 'w' : ''}">${pts(x)}</td>${ps}<td class="w">${x.power ? x.power.toFixed(0) + 'M' : '–'}</td></tr>`;
+        <td class="who"><button type="button" class="linkbtn" data-act="raceopp" data-name="${esc(x.name)}">${esc(short(x.name))}</button>${x.al ? ` <span class="meta">${esc(x.al)}</span>` : ''}<div class="meta sub">${esc(x.g)} ${where} · ${rec(x)} · ${pts(x)}${x.pf ? ' · ' + PROF[x.pf] : ''}</div></td>
+        <td class="w">${x.pf ? PROF[x.pf] : '<span class="meta">–</span>'}</td><td class="w">${esc(x.g)} <span class="meta">${where}</span></td><td class="w">${rec(x)}</td><td class="${hasProj ? 'w' : ''}">${pts(x)}</td>${ps}<td class="w">${x.power ? x.power.toFixed(0) + 'M' : '–'}</td></tr>`;
     }).join('');
     const what = scope === 'seed'
       ? `The top ${adv} of each group advance: ${seeds.length} players in all. Their seed is their place by total score among those ${seeds.length}.`
@@ -2733,16 +2748,16 @@ details[open] > summary { margin-bottom: 10px; }
           <button type="button" data-act="stscope" data-v="all" aria-pressed="${scope === 'all'}">All top ${top}s</button>
         </div>
         <select id="st-group" aria-label="Group"><option value="">All groups</option>${groups.map((g) => `<option value="${esc(g)}"${g === grp ? ' selected' : ''}>Group ${esc(g)}</option>`).join('')}</select>
-        <input id="st-find" type="text" autocomplete="off" spellcheck="false" aria-label="Find a player or alliance" placeholder="Player or alliance" value="${esc(S.stFind || '')}">
+        <input id="st-find" type="text" autocomplete="off" spellcheck="false" aria-label="Find a player, alliance or profession" placeholder="Player, alliance, engineer…" value="${esc(S.stFind || '')}">
       </div>`;
     const head2 = scope === 'proj' ? ['Seed', `Top ${adv}`, 'Range'] : [scope === 'seed' ? 'Seed' : '#', `Top ${adv}`, 'Likely seed'];
     const table = list.length
-      ? `<div class="scroll"><table class="stand"><thead><tr><th class="n">${head2[0]}</th><th>Player</th><th class="w">Group</th><th class="w">Record</th><th class="${hasProj ? 'w' : ''}">Score</th>${hasProj ? `<th>${head2[1]}</th><th>${head2[2]}</th>` : ''}<th class="w">Power</th></tr></thead><tbody>${body}</tbody></table></div>`
+      ? `<div class="scroll"><table class="stand"><thead><tr><th class="n">${head2[0]}</th><th>Player</th><th class="w">Profession</th><th class="w">Group</th><th class="w">Record</th><th class="${hasProj ? 'w' : ''}">Score</th>${hasProj ? `<th>${head2[1]}</th><th>${head2[2]}</th>` : ''}<th class="w">Power</th></tr></thead><tbody>${body}</tbody></table></div>`
       : `<div class="empty">${find ? `No player matches “${esc((S.stFind || '').trim())}”${grp ? ` in group ${esc(grp)}` : ''}.` : 'Nobody to show here.'}</div>`;
-    const foot = `The game only publishes current scores for each group's top ${top}, so those are the players with exact numbers. Seeds today show where things stand now and will move every round until round ${R.rounds}.${hasProj ? ` Top ${adv} is the chance of finishing in the group's top ${adv}. Likely seed is the middle result of ${R.runs.toLocaleString()} simulated runs of the last ${R.rounds - played} rounds, with the range it lands in 8 runs out of 10, counted when the player makes the top ${adv}; ~ marks a score estimated for a player outside the top ${top}.` : ''}`;
+    const foot = `Profession (War Leader or Engineer) is read from each player's latest battle report. The game only publishes current scores for each group's top ${top}, so those are the players with exact numbers. Seeds today show where things stand now and will move every round until round ${R.rounds}.${hasProj ? ` Top ${adv} is the chance of finishing in the group's top ${adv}. Likely seed is the middle result of ${R.runs.toLocaleString()} simulated runs of the last ${R.rounds - played} rounds, with the range it lands in 8 runs out of 10, counted when the player makes the top ${adv}; ~ marks a score estimated for a player outside the top ${top}.` : ''}`;
     const card = `<section class="card">${title(scope === 'seed' ? 'Semi-final seeding today' : scope === 'proj' ? `Likely seeding after round ${R.rounds}` : 'Overall standings', `${grp ? `group ${esc(grp)} · ` : ''}${asOf}`)}
       ${ctl}
-      <p class="meta">${what} Tap a name to scout that player.</p>
+      <p class="meta">${what} Tap a name to scout that player.${(() => { const k = list.filter((x) => x.pf === 'W').length, e = list.filter((x) => x.pf === 'E').length; return k + e ? ` In this list: ${k} War ${k === 1 ? 'Leader' : 'Leaders'}, ${plural(e, 'Engineer')}.` : ''; })()}</p>
       ${table}
       <p class="foot">${foot}</p></section>`;
     return `<div class="stack" style="gap:16px">${head}${card}</div>`;
