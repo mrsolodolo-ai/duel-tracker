@@ -334,6 +334,7 @@ details[open] > summary { margin-bottom: 10px; }
     bonus: 0.04,     // counter edge on hero power when a squad's type beats the enemy's (fitted on 391 real encounters)
     sigma: 0.03,     // spread of hidden strength around listed power (lognormal sd, per squad; fitted)
     attr: 1.5,       // attrition exponent: how many troops a winner keeps (fitted on real survivor counts)
+    prof: 0.033,     // War Leader edge on squad power over an Engineer (fitted on 1,557 War Leader v Engineer fights: +3.0 to +3.5%)
     sims: 1500,      // simulations for the live matchup
     fitSims: 40,     // simulations per matchup when learning from history (40 matched 120 on day-2 data and builds 3x faster)
     decay: 0.5,      // how fast older formations fade from a player's habit
@@ -541,19 +542,22 @@ details[open] > summary { margin-bottom: 10px; }
     }
     return { mAB: mAB, mBA: mBA };
   }
+  // A War Leader's squads fight as if they had a little more power than listed (DEFAULTS.prof).
+  function profMult(pf, bonus) { return pf === 'W' ? 1 + (bonus != null ? bonus : DEFAULTS.prof) : 1; }
   var matCache = {}, matCacheSize = 0;
   // 6x6 matrix: chance side A wins when A plays order i and B plays order j (orders of the canonical lists).
   function winMatrix(A, B, opt) {
     var bonus = opt.bonus, sigma = opt.sigma, n = opt.n || opt.sims, attr = opt.attr || DEFAULTS.attr;
-    var key = JSON.stringify([A, B, bonus, sigma, n, attr]);
+    var ma = opt.ma || 1, mb = opt.mb || 1; // profession multipliers for side A and side B (profMult)
+    var key = JSON.stringify([A, B, bonus, sigma, n, attr, ma, mb]);
     if (matCache[key]) return matCache[key];
     var z = getNoise(n, 777), t = multTables(A, B, bonus);
     var wins = new Float64Array(36), SA = new Float64Array(3), SB = new Float64Array(3);
     for (var s = 0; s < n; s++) {
       var off = s * 6;
       for (var c = 0; c < 3; c++) {
-        SA[c] = A[c].p * Math.exp(sigma * z[off + c]);
-        SB[c] = B[c].p * Math.exp(sigma * z[off + 3 + c]);
+        SA[c] = A[c].p * ma * Math.exp(sigma * z[off + c]);
+        SB[c] = B[c].p * mb * Math.exp(sigma * z[off + 3 + c]);
       }
       for (var i = 0; i < 6; i++) for (var j = 0; j < 6; j++) wins[i * 6 + j] += fight(PERMS[i], PERMS[j], SA, SB, t.mAB, t.mBA, attr);
     }
@@ -884,7 +888,9 @@ details[open] > summary { margin-bottom: 10px; }
     if (!myPerms.length || myPerms[myPerms.length - 1] !== shownPerm) myPerms.push(shownPerm);
     var myHabit = habitDist(myPerms, opt.decay);
 
-    var W = winMatrix(c.canon, mc.canon, { bonus: opt.bonus, sigma: opt.sigma, attr: opt.attr, n: q.sims || opt.sims }); // their view
+    // professions: theirs from their fights (or q.oppPf), yours from your fights (or q.myPf)
+    var pfOpp = q.oppPf || (pl && pl.pf) || '', pfMe = q.myPf || (mine && mine.pf) || '';
+    var W = winMatrix(c.canon, mc.canon, { bonus: opt.bonus, sigma: opt.sigma, attr: opt.attr, n: q.sims || opt.sims, ma: profMult(pfOpp, opt.prof), mb: profMult(pfMe, opt.prof) }); // their view
     var lex = null;
     for (var q2 = entries.length - 1; q2 >= 0; q2--) if (entries[q2].ex) { lex = entries[q2]; break; }
     var d = expertDists({ canon: c.canon, prevPerms: prevPerms, lastResult: lastResult, W: W, oppHabit: myHabit, strong: lex ? strongOf(c.canon, lex.ex, lex.form) : strongestIndex(c.canon)[0], seenCanon: mc.canon }, opt);
@@ -910,7 +916,8 @@ details[open] > summary { margin-bottom: 10px; }
       theirCanon: c.canon, theirLastPerm: prevPerms.length ? prevPerms[prevPerms.length - 1] : null,
       myCanon: mc.canon, shownPerm: shownPerm, myCurrentPerm: mc.perm,
       p: p, weights: w, experts: d, rematch: rm, Wme: Wme, ev: ev, worst: worst, worstAgainst: worstAgainst,
-      nash: nash, ranked: ranked, best: ranked[0]
+      nash: nash, ranked: ranked, best: ranked[0],
+      prof: { me: pfMe, opp: pfOpp, bonus: opt.prof != null ? opt.prof : DEFAULTS.prof }
     };
   }
   function sameForm(f, g) {
@@ -1065,7 +1072,7 @@ details[open] > summary { margin-bottom: 10px; }
     normType: normType, normPower: normPower, normSquads: normSquads, normBattle: normBattle, battleKey: battleKey, keyOf: keyOf,
     canonical: canonical, matchPerm: matchPerm, orderSquads: orderSquads, strongestIndex: strongestIndex,
     extrasOf: extrasOf, moveOverlord: moveOverlord, mainType: mainType, bestGeared: bestGeared,
-    winMatrix: winMatrix, flipMatrix: flipMatrix, winProb: winProb, solveZeroSum: solveZeroSum,
+    winMatrix: winMatrix, flipMatrix: flipMatrix, winProb: winProb, profMult: profMult, solveZeroSum: solveZeroSum,
     bestResponse: bestResponse, minResponse: minResponse, habitDist: habitDist, expertDists: expertDists, mixDists: mixDists,
     fitWeights: fitWeights, buildIndex: buildIndex, buildModel: buildModel, walkForward: walkForward, habitStats: habitStats,
     predict: predict, sameForm: sameForm, calibrate: calibrate, encounterRows: encounterRows, exampleData: exampleData, argmax: argmax, mulberry32: mulberry32
@@ -1146,10 +1153,11 @@ details[open] > summary { margin-bottom: 10px; }
   // Many fights of A (slot order) against B (slot order): win chance and points given each result.
   function pairStats(A, B, trA, trB, opt) {
     var n = opt.n || 200, rnd = mulberry32(opt.seed || 12345), g = gaussFrom(rnd), sig = opt.sigma, bonus = opt.bonus, k = opt.attr || 1.5;
+    var ma = opt.ma || 1, mb = opt.mb || 1; // profession: a War Leader's squads count for a little more (engine profMult)
     var tA = A.map(function (q) { return q.t; }), tB = B.map(function (q) { return q.t; });
     var SA = [0, 0, 0], SB = [0, 0, 0], w = 0, a1 = 0, b1 = 0, a0 = 0, b0 = 0, nl = 0;
     for (var s = 0; s < n; s++) {
-      for (var c = 0; c < 3; c++) { SA[c] = A[c].p * Math.exp(sig * g()); SB[c] = B[c].p * Math.exp(sig * g()); }
+      for (var c = 0; c < 3; c++) { SA[c] = A[c].p * ma * Math.exp(sig * g()); SB[c] = B[c].p * mb * Math.exp(sig * g()); }
       var r = fightPts(SA, SB, trA, trB, tA, tB, bonus, k);
       if (r[0] >= 0.5) { w += r[0]; a1 += r[1]; b1 += r[2]; } else { nl++; a0 += r[1]; b0 += r[2]; }
     }
@@ -1165,7 +1173,7 @@ details[open] > summary { margin-bottom: 10px; }
   var KEEP = 0.78, PERM_ORDERS = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
   function matchStats(A, B, trA, trB, opt) {
     var base = pairStats(A, B, trA, trB, Object.assign({}, opt, { n: opt.n || 120 }));
-    var pa = A.reduce(function (s, q) { return s + q.p; }, 0), pb = B.reduce(function (s, q) { return s + q.p; }, 0);
+    var pa = (opt.ma || 1) * A.reduce(function (s, q) { return s + q.p; }, 0), pb = (opt.mb || 1) * B.reduce(function (s, q) { return s + q.p; }, 0);
     if (Math.max(pa, pb) / Math.min(pa, pb) > (opt.closeRatio || 1.25)) return base;
     var hw = function (k) { return k === 0 ? KEEP : (1 - KEEP) / 5; }, P = 0, A1 = 0, B1 = 0, A0 = 0, B0 = 0, W1 = 0, W0 = 0;
     for (var i = 0; i < 6; i++) for (var j = 0; j < 6; j++) {
@@ -1189,7 +1197,7 @@ details[open] > summary { margin-bottom: 10px; }
       var A = E.PERMS[i].map(function (c) { return myCanon[c]; }), ta = E.PERMS[i].map(function (c) { return trMine[c]; });
       for (var j = 0; j < 6; j++) {
         var B = E.PERMS[j].map(function (c) { return theirCanon[c]; }), tb = E.PERMS[j].map(function (c) { return trTheirs[c]; });
-        var st = pairStats(A, B, ta, tb, { n: opt.n || 300, seed: 777 + i * 6 + j, sigma: opt.sigma, bonus: opt.bonus, attr: opt.attr });
+        var st = pairStats(A, B, ta, tb, { n: opt.n || 300, seed: 777 + i * 6 + j, sigma: opt.sigma, bonus: opt.bonus, attr: opt.attr, ma: opt.ma, mb: opt.mb });
         W[i].push(st.p); PM[i].push(st.p * st.a1 + (1 - st.p) * st.a0); PT[i].push(st.p * st.b1 + (1 - st.p) * st.b0);
       }
     }
@@ -1206,7 +1214,8 @@ details[open] > summary { margin-bottom: 10px; }
     var lin = function (x, x0, y0, x1, y1) { return x <= x0 ? y0 : x >= x1 ? y1 : y0 + (y1 - y0) * (x - x0) / (x1 - x0); };
     return { p: power <= 148 ? lin(power, 128, 0.5, 148, 0.74) : lin(power, 148, 0.74, 156, 0.78), win: Math.round(lin(power, 115, 1010000, 152, 1170000)), loss: 420000 };
   }
-  // players: [{key, name, score, wins, form (slot order, last played), tr (troops, slot order), unk, cap, unkP, unkWin, unkLoss}]
+  // players: [{key, name, score, wins, form (slot order, last played), tr (troops, slot order), pm, unk, cap, unkP, unkWin, unkLoss}]
+  // pm: profession multiplier on squad power (War Leader 1 + bonus, Engineer 1; from the engine's profMult).
   // unk / cap are for players outside the official top 16: the feed only gives their score as of the last round they
   // fought a top-16 player. `score` and `wins` hold what is known (that snapshot plus later logged fights), `unk` is how
   // many of the rounds played so far are unknown, and `cap` is the most they can have now (the 16th place's score).
@@ -1276,7 +1285,7 @@ details[open] > summary { margin-bottom: 10px; }
       var key = i < j ? i * 4096 + j : j * 4096 + i, s = cache.get(key);
       if (!s) {
         var lo = i < j ? i : j, hi = i < j ? j : i;
-        s = matchStats(players[lo].form, players[hi].form, players[lo].tr, players[hi].tr, Object.assign({ seed: 99 + key }, statOpt));
+        s = matchStats(players[lo].form, players[hi].form, players[lo].tr, players[hi].tr, Object.assign({ seed: 99 + key, ma: players[lo].pm || 1, mb: players[hi].pm || 1 }, statOpt));
         cache.set(key, s);
       }
       return i < j ? s : { p: 1 - s.p, a1: s.b0, b1: s.a0, a0: s.b1, b0: s.a1 }; // seen from i's side
@@ -2153,6 +2162,7 @@ details[open] > summary { margin-bottom: 10px; }
       <div class="card-h"><h2 id="h-hero">Play this order</h2><span class="stamp">vs ${esc(short(S.opp))}</span></div>
       ${permHTML(pr.myCanon, b, true)}
       <div class="big-row"><span class="big-num">${pct(ev)}</span><span class="cap">chance to win if they play the way the model expects</span></div>
+      ${pr.prof && pr.prof.me && pr.prof.opp && pr.prof.me !== pr.prof.opp ? `<p class="meta">${pr.prof.me === 'W' ? 'You are a War Leader and they are an Engineer: your' : 'They are a War Leader and you are an Engineer: their'} squads count about ${Math.round(pr.prof.bonus * 100)}% stronger than listed here. In the logged fights between the two professions, the War Leader won 84% at equal power.</p>` : ''}
       ${ev >= 0.35 && ev <= 0.65 ? '<p class="callout key"><b>Key match:</b> about even. Toss-ups like this decide the top 8, so check their latest formation in the game before you lock in.</p>' : ''}
       ${lopsided ? `<p class="callout">${lopsided}</p>` : `<p class="callout">Worst case ${pct(pr.worst[b])}, if they play ${minis(E.orderSquads(pr.theirCanon, pr.worstAgainst[b]))}. ${gain < 0.02 ? 'Reading this player barely helps here, so the safe mix below is about as good.' : `The safe mix only guarantees ${pct(pr.nash.value)}.`}</p>`}
       <div class="scroll"><table><thead><tr><th>Other orders</th><th>If predicted</th><th>Worst case</th></tr></thead><tbody>
@@ -2373,7 +2383,9 @@ details[open] > summary { margin-bottom: 10px; }
   function insightsFor(pl) {
     const st = settings(), P = fullIndex().players, bonus = +st.bonus;
     const opt = { bonus, sigma: +st.sigma, attr: +st.attr || 1.5, n: 300 };
+    const opt0 = opt;
     return pl.entries.map((e) => {
+      const opt = Object.assign({}, opt0, { ma: E.profMult(pl.pf), mb: E.profMult((P[e.oppKey] || {}).pf) }); // professions of both
       const mine = E.canonical(e.form), theirs = E.canonical(e.oppForm);
       const W = E.winMatrix(mine.canon, theirs.canon, opt);
       const played = W[mine.perm][theirs.perm], bk = colBest(W, theirs.perm), best = W[bk][theirs.perm];
@@ -2627,7 +2639,7 @@ details[open] > summary { margin-bottom: 10px; }
       <div class="scroll"><table class="race"><thead><tr><th>Player <span class="meta">(place now)</span></th><th>Top 8</th><th>Record</th><th>Score</th></tr></thead><tbody>
       ${rows.map((o) => `<tr class="${o.i === x.i ? 'me' : ''}"><td><span class="meta">#${o.i + 1}</span> ${esc(short(o.p[0]))}${profTag(o.p[0], true)}</td><td><span class="racebar"><span class="bar"><i style="width:${(o.p[3] * 100).toFixed(1)}%"></i></span><span class="pct">${pct(o.p[3])}</span></span></td><td>${recOf(o.p, played)}</td><td>${scoreOf(o.p)}</td></tr>`).join('')}
       </tbody></table></div>
-      <p class="foot">${R.runs.toLocaleString()} simulated runs of the last ${left} rounds. Each fight uses both players' latest squads and troops, mostly in their usual order. Pairing follows the standings in blocks of 16 places, as it did on days 1–2: in round 9, 87% of top-16 players met another top-16 player. Tested on day 2, starting from the round-8 standings: of the players it gave 75–95%, 87% made the top 8; of those it gave under 5%, 2% did. It expected 78 players from outside a top 16 to break into one, and 77 did. It assumes squads stay as they are and everyone plays every round.${rows.some((o) => estd(o.p)) ? ' ~ marks players outside the top 16: the game only shows their score from the last time they fought a top-16 player, so the rounds since are estimated and can never put them above 16th place.' : ''} Points: a loss scores 66 per enemy troop killed; a win scores 300,000 plus 66 per enemy troop killed and per troop you keep. ${PROF_KEY}</p></section>`;
+      <p class="foot">${R.runs.toLocaleString()} simulated runs of the last ${left} rounds. Each fight uses both players' latest squads and troops, mostly in their usual order. Pairing follows the standings in blocks of 16 places, as it did on days 1–2: in round 9, 87% of top-16 players met another top-16 player. Tested on day 2, starting from the round-8 standings: of the players it gave 75–95%, 87% made the top 8; of those it gave under 5%, 2% did. It expected 78 players from outside a top 16 to break into one, and 77 did. War Leaders' squads count about 3% stronger than listed, as the logged fights between the two professions show. It assumes squads stay as they are and everyone plays every round.${rows.some((o) => estd(o.p)) ? ' ~ marks players outside the top 16: the game only shows their score from the last time they fought a top-16 player, so the rounds since are estimated and can never put them above 16th place.' : ''} Points: a loss scores 66 per enemy troop killed; a win scores 300,000 plus 66 per enemy troop killed and per troop you keep. ${PROF_KEY}</p></section>`;
     return `<div class="grid2"><div class="stack" style="gap:16px">${head}${oppCard}</div><div class="stack" style="gap:16px">${raceCard}</div></div>`;
   }
   // When no order wins: the order that scores the most points, i.e. kills the most of their troops.
@@ -2641,7 +2653,7 @@ details[open] > summary { margin-bottom: 10px; }
     const trMine = pr.myCanon.map((q) => (q.id != null && tmMe[String(q.id)]) || fbMe);
     const trTheirs = pr.theirCanon.map((q) => (q.id != null && tmOpp[String(q.id)]) || fbOpp);
     const st = settings();
-    const M = D.pointsMatrix(pr.myCanon, pr.theirCanon, trMine, trTheirs, { n: 200, sigma: +st.sigma, bonus: +st.bonus, attr: +st.attr || 1.5 });
+    const M = D.pointsMatrix(pr.myCanon, pr.theirCanon, trMine, trTheirs, { n: 200, sigma: +st.sigma, bonus: +st.bonus, attr: +st.attr || 1.5, ma: E.profMult(pr.prof && pr.prof.me), mb: E.profMult(pr.prof && pr.prof.opp) });
     const exp = M.mine.map((row) => row.reduce((acc, v, j) => acc + v * pr.p[j], 0));
     return { exp, best: exp.indexOf(Math.max.apply(null, exp)), guessed: !Object.keys(tmMe).length || !Object.keys(tmOpp).length };
   }
