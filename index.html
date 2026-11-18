@@ -81,6 +81,24 @@ table.race-opps .linkbtn, table.race .linkbtn { text-align: left; }
 table.race-opps .tag { margin-top: 3px; display: inline-block; }
 table.race-opps td:first-child .meta, table.race td { white-space: nowrap; }
 table.race th .meta { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.st-ctl { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.st-ctl select { width: auto; flex: 0 0 auto; }
+.st-ctl input { flex: 1 1 190px; width: auto; }
+table.stand td { white-space: nowrap; }
+table.stand td.who { white-space: normal; }
+table.stand th.n, table.stand td.n { text-align: right; width: 1%; padding-right: 10px; }
+table.stand td.n { font-family: var(--display); font-weight: 800; font-size: 18px; color: var(--muted); }
+table.stand tr.me td { background: color-mix(in oklab, var(--accent) 14%, transparent); font-weight: 700; }
+table.stand tr.me td.n { color: var(--ink); }
+table.stand tr.mate td.n { box-shadow: inset 3px 0 0 var(--accent); }
+table.stand tr.out td, table.stand tr.out .linkbtn { color: var(--muted); }
+table.stand tr.cutline td { font-family: var(--cond); font-weight: 700; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--loss); border-bottom: 2px solid var(--loss); padding: 3px 8px; }
+table.stand .linkbtn { text-align: left; }
+table.stand .sub { display: none; }
+@media (max-width: 620px) {
+  table.stand .w { display: none; }
+  table.stand .sub { display: block; }
+}
 .tip-list { margin: 4px 0 0; padding-left: 18px; font-size: 14px; display: flex; flex-direction: column; gap: 4px; }
 .tip-rows { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .tip-row { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; }
@@ -263,6 +281,7 @@ details[open] > summary { margin-bottom: 10px; }
   <nav class="tabs" aria-label="Sections">
     <a href="#next" data-view="next">Next fight</a>
     <a href="#race" data-view="race">Top 8</a>
+    <a href="#standings" data-view="standings">Standings</a>
     <a href="#insights" data-view="insights">Insights</a>
     <a href="#opponents" data-view="opponents">Opponents</a>
     <a href="#log" data-view="log">Battle log</a>
@@ -1259,7 +1278,7 @@ details[open] > summary { margin-bottom: 10px; }
 (() => {
   'use strict';
   const E = window.DuelEngine;
-  const VIEWS = ['next', 'race', 'insights', 'opponents', 'log', 'patterns', 'setup'];
+  const VIEWS = ['next', 'race', 'standings', 'insights', 'opponents', 'log', 'patterns', 'setup'];
   const DEF_SHARED = { me: 'Sammyboy99', bonus: 0.04, sigma: 0.03, attr: 1.5, sims: 1500 };
   const DEF_PERSONAL = { me: '', myForm: null };
   const LS_ME = 'lw-duel-tracker-me-v1';
@@ -2505,6 +2524,87 @@ details[open] > summary { margin-bottom: 10px; }
     </section>`;
   }
 
+  /* ---------- Standings: every group's published top 16, and the semi-final seeding ---------- */
+  // The game publishes current scores only for each group's top 16, so those are the players listed (race.json keeps
+  // them as the first rows of each group). Seeds: the top 8 of every group, ordered by total score.
+  let STC = null;
+  const ordinal = (n) => { const v = n % 100, sfx = ['th', 'st', 'nd', 'rd']; return n + (sfx[(v - 20) % 10] || sfx[v] || sfx[0]); };
+  function standingsRows() {
+    const R = S.race, P = fullIndex().players;
+    if (STC && STC.race === R && STC.k === FIK) return STC.rows;
+    const top = R.top || 16, adv = R.advance || 8, rows = [];
+    Object.keys(R.groups).sort().forEach((g) => R.groups[g].p.slice(0, top).forEach((r, i) => {
+      const pl = P[key(r[0])], last = pl && pl.entries.length ? pl.entries[pl.entries.length - 1] : null;
+      rows.push({ g, gi: i, r, name: r[0], k: key(r[0]), score: r[1], wins: r[2], al: pl && pl.al ? String(pl.al) : '',
+        power: last ? last.form.reduce((acc, q) => acc + (+q.p || 0), 0) : null, adv: i < adv });
+    }));
+    rows.sort((a, b) => b.score - a.score || (a.g < b.g ? -1 : a.g > b.g ? 1 : a.gi - b.gi));
+    let seed = 0;
+    rows.forEach((x, n) => { x.place = n + 1; x.seed = x.adv ? ++seed : null; });
+    STC = { race: R, k: FIK, rows };
+    return rows;
+  }
+  function viewStandings() {
+    loadRace();
+    const st = S.raceState;
+    const title = (h, aside) => `<div class="card-h"><h2>${h}</h2>${aside ? `<span class="aside">${aside}</span>` : ''}</div>`;
+    if (st !== 'ok') return `<section class="card">${title('Standings')}<div class="empty">${st === 'none' ? "Standings aren't available right now." : 'Loading the standings…'}</div></section>`;
+    const R = S.race, adv = R.advance || 8, top = R.top || 16, played = R.round, asOf = `after round ${played} of ${R.rounds}`;
+    const all = standingsRows(), groups = Object.keys(R.groups).sort(), seeds = all.filter((x) => x.adv);
+    const scope = S.stScope === 'all' ? 'all' : 'seed', grp = groups.indexOf(S.stGroup) >= 0 ? S.stGroup : '', find = (S.stFind || '').trim().toLowerCase();
+    const meK = key(settings().me || ''), mine = meK ? all.find((x) => x.k === meK) : null;
+    const team = teamAlliance(), extra = new Set(EXTRA_MATES.map(key));
+    const proj = all.some((x) => x.r[9]); // projected seeds, once the simulation carries them
+    const rec = (x) => `${x.wins}–${played - x.wins}`;
+    const gap = (v) => `${(Math.abs(v) / 1e6).toFixed(2)}M`;
+
+    // Your seed
+    let head = '';
+    if (mine && mine.adv) {
+      const above = seeds[mine.seed - 2], below = seeds[mine.seed];
+      head = `<section class="card">${title('Your seed', asOf)}
+        <div class="big-row"><span class="big-num">#${mine.seed}</span><span class="cap">of ${seeds.length}: where ${esc(mine.name)} would be seeded for the semi-finals if the qualifier ended now</span></div>
+        <div>${stat(`Group ${esc(mine.g)}`, `${ordinal(mine.gi + 1)} · ${fmtS(mine.score)} · ${rec(mine)}`)}${above ? stat(`Seed ${above.seed}, just above`, `${esc(short(above.name))} · ${gap(above.score - mine.score)} ahead`) : ''}${below ? stat(`Seed ${below.seed}, just below`, `${esc(short(below.name))} · ${gap(mine.score - below.score)} behind`) : ''}${proj && mine.r[9] ? stat(`Likely seed after round ${R.rounds}`, `${mine.r[9][1]} (range ${mine.r[9][0]}–${mine.r[9][2]})`) : ''}</div></section>`;
+    } else if (mine) {
+      const last = all.find((x) => x.g === mine.g && x.gi === adv - 1);
+      head = `<section class="card">${title('Your seed', asOf)}
+        <p><b>${esc(mine.name)}</b> is ${ordinal(mine.gi + 1)} in group ${esc(mine.g)} with ${fmtS(mine.score)}. Only the top ${adv} of each group get a seed${last ? `: ${ordinal(adv)} place is ${esc(short(last.name))} at ${fmtS(last.score)}, ${gap(last.score - mine.score)} ahead` : ''}.</p></section>`;
+    }
+
+    // The list
+    let list = all.filter((x) => (scope === 'all' || x.adv) && (!grp || x.g === grp));
+    if (find) list = list.filter((x) => x.name.toLowerCase().indexOf(find) >= 0 || x.al.toLowerCase().indexOf(find) >= 0);
+    const cols = 6 + (proj ? 2 : 0);
+    const body = list.map((x) => {
+      const cls = [x.k === meK ? 'me' : '', (x.al && x.al === team) || extra.has(x.k) ? 'mate' : '', x.adv ? '' : 'out'].filter(Boolean).join(' ');
+      const cut = scope === 'all' && grp && !find && x.gi === adv ? `<tr class="cutline"><td colspan="${cols}">Top ${adv} advance</td></tr>` : '';
+      const ps = proj ? `<td>${x.r[3] >= 0.995 ? '99%+' : pct(x.r[3])}</td><td>${x.r[9] ? `${x.r[9][1]} <span class="meta">${x.r[9][0]}–${x.r[9][2]}</span>` : '<span class="meta">–</span>'}</td>` : '';
+      return `${cut}<tr class="${cls}"><td class="n">${scope === 'seed' ? x.seed : x.place}</td>
+        <td class="who"><button type="button" class="linkbtn" data-act="raceopp" data-name="${esc(x.name)}">${esc(short(x.name))}</button>${x.al ? ` <span class="meta">${esc(x.al)}</span>` : ''}<div class="meta sub">Group ${esc(x.g)} · ${ordinal(x.gi + 1)} · ${rec(x)}</div></td>
+        <td class="w">${esc(x.g)} <span class="meta">${ordinal(x.gi + 1)}</span></td><td class="w">${rec(x)}</td><td>${fmtS(x.score)}</td>${ps}<td class="w">${x.power ? x.power.toFixed(0) + 'M' : '–'}</td></tr>`;
+    }).join('');
+    const what = scope === 'seed'
+      ? `The top ${adv} of each group advance: ${seeds.length} players in all. Their seed is their place by total score among those ${seeds.length}.`
+      : `Each group's top ${top}, ranked by total score across all groups. Players outside their group's top ${adv} are greyed out.`;
+    const ctl = `<div class="st-ctl">
+        <div class="seg" role="group" aria-label="Players shown">
+          <button type="button" data-act="stscope" data-v="seed" aria-pressed="${scope === 'seed'}">Semi-final seeds</button>
+          <button type="button" data-act="stscope" data-v="all" aria-pressed="${scope === 'all'}">All top ${top}s</button>
+        </div>
+        <select id="st-group" aria-label="Group"><option value="">All groups</option>${groups.map((g) => `<option value="${esc(g)}"${g === grp ? ' selected' : ''}>Group ${esc(g)}</option>`).join('')}</select>
+        <input id="st-find" type="text" autocomplete="off" spellcheck="false" aria-label="Find a player or alliance" placeholder="Player or alliance" value="${esc(S.stFind || '')}">
+      </div>`;
+    const table = list.length
+      ? `<div class="scroll"><table class="stand"><thead><tr><th class="n">${scope === 'seed' ? 'Seed' : '#'}</th><th>Player</th><th class="w">Group</th><th class="w">Record</th><th>Score</th>${proj ? `<th>Top ${adv}</th><th>Likely seed</th>` : ''}<th class="w">Power</th></tr></thead><tbody>${body}</tbody></table></div>`
+      : `<div class="empty">No player matches “${esc((S.stFind || '').trim())}”${grp ? ` in group ${esc(grp)}` : ''}.</div>`;
+    const card = `<section class="card">${title(scope === 'seed' ? 'Semi-final seeding' : 'Overall standings', `${grp ? `group ${esc(grp)} · ` : ''}${asOf}`)}
+      ${ctl}
+      <p class="meta">${what} Tap a name to scout that player.</p>
+      ${table}
+      <p class="foot">The game only publishes current scores for each group's top ${top}, so those are the players listed. Seeds show where things stand today and will move every round until round ${R.rounds}.${proj ? ` Likely seed: the middle result of the simulated last ${R.rounds - played} rounds, with the range it lands in 8 times out of 10, counted only when the player makes the top ${adv}.` : ''}</p></section>`;
+    return `<div class="stack" style="gap:16px">${head}${card}</div>`;
+  }
+
   /* ---------- Setup ---------- */
   function exportJSON() {
     return JSON.stringify(S.battles.map((b) => { const n = E.normBattle(b); return n ? Object.assign({ round: n.round }, n.g ? { g: n.g } : {}, { a: n.a, b: n.b, win: n.win }, n.e ? { e: n.e } : {}) : null; }).filter(Boolean));
@@ -2558,7 +2658,7 @@ details[open] > summary { margin-bottom: 10px; }
     return `<div class="grid2"><div class="stack" style="gap:16px">${you}${team}${sim}</div><div class="stack" style="gap:16px">${data}${how}</div></div>`;
   }
 
-  const VIEW = { next: viewNext, race: viewRace, insights: viewInsights, opponents: viewOpponents, log: viewLog, patterns: viewPatterns, setup: viewSetup };
+  const VIEW = { next: viewNext, race: viewRace, standings: viewStandings, insights: viewInsights, opponents: viewOpponents, log: viewLog, patterns: viewPatterns, setup: viewSetup };
 
   /* ---------- actions ---------- */
   async function saveForm() {
@@ -2634,6 +2734,7 @@ details[open] > summary { margin-bottom: 10px; }
     else if (a === 'dismiss') { S.note = ''; S.noteErr = false; render(); }
     else if (a === 'opp') { setOpp(el.dataset.name); S.oppOpen = false; render(); }
     else if (a === 'raceopp') { setOpp(el.dataset.name); S.oppOpen = false; if (location.hash !== '#next') location.hash = 'next'; else render(); }
+    else if (a === 'stscope') { S.stScope = el.dataset.v === 'all' ? 'all' : 'seed'; render(); }
     else if (a === 'oedit') { S.oppOpen = !S.oppOpen; render(); }
     else if (a === 'melog') { S.personal.myForm = null; S.meDraft = null; S.shownPerm = null; S.roll = null; savePersonal(); render(); }
     else if (a === 'mehand') {
@@ -2685,6 +2786,7 @@ details[open] > summary { margin-bottom: 10px; }
   document.addEventListener('input', (ev) => {
     const t = ev.target;
     if (t.dataset && t.dataset.target && t.dataset.slot != null) { const d = draftOf(t.dataset.target); if (d) d[+t.dataset.slot].p = t.value; return; }
+    if (t.id === 'st-find') { S.stFind = t.value; render(); return; }
     if (t.id === 'opp-name') {
       S.oppText = t.value;
       if (isPick(ev) && fullIndex().players[key(t.value)]) { setOpp(t.value); render(); }
@@ -2702,6 +2804,7 @@ details[open] > summary { margin-bottom: 10px; }
   document.addEventListener('change', (ev) => {
     const t = ev.target;
     if (t.id === 'ins-pick') { S.insFor = t.value; render(); return; }
+    if (t.id === 'st-group') { S.stGroup = t.value; render(); return; }
     if (t.id === 'me-pick' || t.id === 'set-me') {
       if (t.value === OTHER) { S.meManual = true; S.meText = null; render(); focusSoon('me-name'); return; }
       pickMe(t.value); return;
