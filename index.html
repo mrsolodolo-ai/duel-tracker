@@ -326,7 +326,7 @@ details[open] > summary { margin-bottom: 10px; }
   var TYPE_NAME = { T: 'Tank', A: 'Aircraft', M: 'Missile', X: 'Mixed' };
   var BEATS = { T: 'M', M: 'A', A: 'T' }; // key beats value
   var PERMS = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
-  var EXPERTS = ['habit', 'strongest', 'counter', 'wsls', 'double', 'dodge', 'tcounter', 'random'];
+  var EXPERTS = ['habit', 'strongest', 'counter', 'wsls', 'double', 'dodge', 'tcounter', 'pcounter', 'random'];
   var EXPERT_INFO = {
     habit: { label: 'Creature of habit', blurb: 'Plays the order they used most recently.' },
     strongest: { label: 'Strongest squad first', blurb: 'Leads with their highest-power squad, as most guides advise.' },
@@ -334,12 +334,13 @@ details[open] > summary { margin-bottom: 10px; }
     wsls: { label: 'Keeps a win, changes a loss', blurb: 'Same order after a win; something different after a loss.' },
     double: { label: 'Second-guesser', blurb: 'Expects to be countered, so counters the counter.' },
     tcounter: { label: 'Type-counters what they see', blurb: "Lines up Tank against the Missile squad, Missile against the Aircraft squad and Aircraft against the Tank squad of their opponent's last formation. Common when the result is not in doubt and the points are." },
+    pcounter: { label: 'Replies by points', blurb: "Picks the order that scores the most points (the win, troops kept, kills) against their opponent's last formation." },
     dodge: { label: 'Dodges counters with strong squad', blurb: "Keeps their strong squad (Overlord and best gear) away from the counter in their opponent's last order, ideally against a squad it beats." },
     random: { label: 'Unpredictable', blurb: 'No pattern the model can find.' }
   };
   var REMATCH_INFO = { label: 'Remembers your last meeting', blurb: 'In a rematch, replays the order that beat you, or counters the order that beat them.' };
   var RM_PRIOR = { a: 1, b: 2 }; // weak prior: about a third of rematch choices follow the last meeting
-  var DEFAULT_W = { habit: 0.40, strongest: 0.15, counter: 0.15, wsls: 0.12, double: 0.06, dodge: 0.08, tcounter: 0.10, random: 0.12 };
+  var DEFAULT_W = { habit: 0.40, strongest: 0.15, counter: 0.15, wsls: 0.12, double: 0.06, dodge: 0.08, tcounter: 0.10, pcounter: 0.08, random: 0.12 };
   var DEFAULTS = {
     bonus: 0.0315,   // counter edge on strength when a squad's type beats the enemy's (fitted on 11,259 fresh encounters)
     sigma: 0.017,    // spread of hidden strength around true strength p * x (lognormal sd, per squad; fitted)
@@ -573,8 +574,13 @@ details[open] > summary { margin-bottom: 10px; }
         else if (eb > ea) { fb[b] *= keepShare(eb, ea); qb.push(b); }
       }
     }
+    LASTF.a = fa; LASTF.b = fb; LASTF.qa = qa; LASTF.qb = qb;
     return qa.length ? 1 : (qb.length ? 0 : 0.5);
   }
+  // What the latest fight() left standing: each squad's share of its troops, and the squads still in line.
+  var LASTF = { a: null, b: null, qa: null, qb: null };
+  // Points as a player can size them up, in thousands: the win, a full squad of own troops kept, a full enemy squad killed.
+  var POINTS_WIN = 300, POINTS_SQUAD = 185, POINTS_TIE = 2;
   function multTables(A, B, bonus) {
     var mAB = [[], [], []], mBA = [[], [], []];
     for (var a = 0; a < 3; a++) for (var b = 0; b < 3; b++) {
@@ -594,7 +600,7 @@ details[open] > summary { margin-bottom: 10px; }
     var key = JSON.stringify([A, B, bonus, sigma, n, attr, ma, mb, legacy]);
     if (matCache[key]) return matCache[key];
     var z = getNoise(n, 777), t = multTables(A, B, bonus);
-    var wins = new Float64Array(36), SA = new Float64Array(3), SB = new Float64Array(3);
+    var wins = new Float64Array(36), util = legacy ? new Float64Array(36) : null, SA = new Float64Array(3), SB = new Float64Array(3);
     var pa = [0, 0, 0], pb = [0, 0, 0], sa = [0, 0, 0], sb = [0, 0, 0], c0;
     for (c0 = 0; c0 < 3; c0++) {
       pa[c0] = legacy ? A[c0].p * ma : eff(A[c0], ma); pb[c0] = legacy ? B[c0].p * mb : eff(B[c0], mb);
@@ -606,10 +612,20 @@ details[open] > summary { margin-bottom: 10px; }
         SA[c] = pa[c] * Math.exp(sa[c] * z[off + c]);
         SB[c] = pb[c] * Math.exp(sb[c] * z[off + 3 + c]);
       }
-      for (var i = 0; i < 6; i++) for (var j = 0; j < 6; j++) wins[i * 6 + j] += fight(PERMS[i], PERMS[j], SA, SB, t.mAB, t.mBA, attr, legacy);
+      for (var i = 0; i < 6; i++) for (var j = 0; j < 6; j++) {
+        var w1 = fight(PERMS[i], PERMS[j], SA, SB, t.mAB, t.mBA, attr, legacy);
+        wins[i * 6 + j] += w1;
+        if (util) {
+          var leftA = 0, leftB = 0, q9;
+          for (q9 = 0; q9 < LASTF.qa.length; q9++) leftA += LASTF.a[LASTF.qa[q9]];
+          for (q9 = 0; q9 < LASTF.qb.length; q9++) leftB += LASTF.b[LASTF.qb[q9]];
+          util[i * 6 + j] += (w1 === 1 ? POINTS_WIN + POINTS_SQUAD * leftA : 0) + POINTS_SQUAD * (3 - leftB);
+        }
+      }
     }
     var M = [];
     for (var i2 = 0; i2 < 6; i2++) { var row = []; for (var j2 = 0; j2 < 6; j2++) row.push(wins[i2 * 6 + j2] / n); M.push(row); }
+    if (util) { M.U = []; for (var i3 = 0; i3 < 6; i3++) { var urow = []; for (var j3 = 0; j3 < 6; j3++) urow.push(util[i3 * 6 + j3] / n); M.U.push(urow); } }
     if (matCacheSize > 2000) { matCache = {}; matCacheSize = 0; }
     matCache[key] = M; matCacheSize++;
     return M;
@@ -693,6 +709,8 @@ details[open] > summary { margin-bottom: 10px; }
     d.random = U;
     d.dodge = ctx.strong != null && ctx.seenCanon && ctx.oppHabit ? dodgeDist(ctx.canon, ctx.strong, ctx.seenCanon, ctx.oppHabit, ctx.prevPerms) : U;
     d.tcounter = ctx.seenCanon && ctx.seenLast != null ? typeCounterDist(ctx.canon, ctx.seenCanon, ctx.seenLast) : U;
+    // Replies by points: the best-scoring order against the formation shown last (ties within 2K points share it).
+    d.pcounter = ctx.UM && ctx.seenLast != null ? bestResponse(ctx.UM, onehot(ctx.seenLast), POINTS_TIE) : U;
     return d;
   }
   // The order(s) with the most type counters, slot by slot, against the formation the opponent showed last.
@@ -820,7 +838,7 @@ details[open] > summary { margin-bottom: 10px; }
     var pex = null;
     for (var q = prev.length - 1; q >= 0; q--) if (prev[q].ex) { pex = prev[q]; break; }
     var strong = pex ? strongOf(c.canon, pex.ex, pex.form) : strongOf(c.canon, e.ex, e.form);
-    var d = expertDists({ canon: c.canon, prevPerms: prevPerms, lastResult: lastResult, W: W, oppHabit: seen.habit, strong: strong, seenCanon: seen.canon, seenLast: matchPerm(seen.lastForm, seen.canon) }, opt);
+    var d = expertDists({ canon: c.canon, prevPerms: prevPerms, lastResult: lastResult, W: W, oppHabit: seen.habit, strong: strong, seenCanon: seen.canon, seenLast: matchPerm(seen.lastForm, seen.canon), UM: W.U }, opt);
     // rematch: the latest earlier fight against this same opponent
     var meet = null;
     for (var i = prev.length - 1; i >= 0; i--) if (prev[i].oppKey === e.oppKey) { meet = prev[i]; break; }
@@ -957,7 +975,7 @@ details[open] > summary { margin-bottom: 10px; }
     var Wtrue = winMatrix(c.canon, mc.canon, { bonus: opt.bonus, sigma: opt.sigma, attr: opt.attr, n: q.sims || opt.sims, ma: profMult(pfOpp, opt.prof), mb: profMult(pfMe, opt.prof) });
     var lex = null;
     for (var q2 = entries.length - 1; q2 >= 0; q2--) if (entries[q2].ex) { lex = entries[q2]; break; }
-    var d = expertDists({ canon: c.canon, prevPerms: prevPerms, lastResult: lastResult, W: W, oppHabit: myHabit, strong: lex ? strongOf(c.canon, lex.ex, lex.form) : strongestIndex(c.canon)[0], seenCanon: mc.canon, seenLast: shownPerm }, opt);
+    var d = expertDists({ canon: c.canon, prevPerms: prevPerms, lastResult: lastResult, W: W, oppHabit: myHabit, strong: lex ? strongOf(c.canon, lex.ex, lex.form) : strongestIndex(c.canon)[0], seenCanon: mc.canon, seenLast: shownPerm, UM: W.U }, opt);
     var w = pl ? model.playerW[k] : model.popW;
     var p = mixDists(d, w);
     // rematch: what happened the last time this player met you
