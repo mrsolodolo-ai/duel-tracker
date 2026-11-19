@@ -146,6 +146,8 @@ table.stand .sub { display: none; }
 
 .note { border: 1px solid var(--line); border-left: 4px solid var(--msl); background: var(--panel); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
 .note.err { border-left-color: var(--loss); }
+.note.asof { border-left-color: var(--accent); }
+.note.asof p { max-width: none; }
 .note p { max-width: 70ch; }
 
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
@@ -945,6 +947,12 @@ details[open] > summary { margin-bottom: 10px; }
   /* ---------- the live call: predict an opponent and pick your order ---------- */
   // q: {opp (name), oppForm (their last formation in slot order, optional override), oppLastResult ('W'|'L'|null, optional),
   //     myForm (your squads in your current slot order), myShown (formation they will see; defaults to your latest logged)}
+  // Reports come in once a day, after the day's rounds, so the formation on record is often not the one a player used
+  // last. Called from the day before, the order a player has used most holds up better than the last one on record, and
+  // the pattern model alone is too sure of itself. So unless a newer formation is entered by hand, the odds blend the
+  // pattern model, how often they have played each order, and an even spread. Tested end to end on 6,192 calls made
+  // from the day before (days 2-3): top pick right 68.7% (67.9% without the blend), log loss 1.022 (1.144).
+  var TEND = { model: 0.6, freq: 0.3, even: 0.1 };
   function predict(model, q) {
     var opt = model.opt, k = keyOf(q.opp), pl = model.index.players[k];
     var entries = pl ? pl.entries : [];
@@ -953,6 +961,9 @@ details[open] > summary { margin-bottom: 10px; }
     if (!oppForm || !q.myForm) return null;
     var c = canonical(oppForm);
     var prevPerms = entries.map(function (e) { return matchPerm(e.form, c.canon); });
+    var counts = [0, 0, 0, 0, 0, 0], mostPlayed = null;
+    prevPerms.forEach(function (k) { counts[k]++; });
+    for (var mp = prevPerms.length - 1; mp >= 0; mp--) if (mostPlayed == null || counts[prevPerms[mp]] > counts[mostPlayed]) mostPlayed = prevPerms[mp];
     var lastResult = latest ? (latest.won ? 'W' : 'L') : null;
     var extra = !q.oppHypo && q.oppForm && (!latest || !sameForm(q.oppForm, latest.form));
     if (extra) { prevPerms.push(c.perm); lastResult = q.oppLastResult || null; }
@@ -986,6 +997,9 @@ details[open] > summary { margin-bottom: 10px; }
       rm = { round: meet.round, theirForm: meet.form, myForm: meet.oppForm, theyWon: meet.won, r: rr.r, n: rr.n, d: dRm };
       p = blend(rr.r, dRm, p);
     }
+    // the tendency blend: only when the formation comes from the reports, not from what the game shows now
+    var pModel = p, tend = !extra && entries.length > 0;
+    if (tend) { var fq = normalizeArr(counts); p = p.map(function (v, i) { return TEND.model * v + TEND.freq * fq[i] + TEND.even / 6; }); }
     var Wme = flipMatrix(Wtrue); // your view: rows = your orders, cols = their orders
     var ev = rowEV(Wme, p);
     var worst = Wme.map(function (row) { return Math.min.apply(null, row); });
@@ -994,6 +1008,7 @@ details[open] > summary { margin-bottom: 10px; }
     var ranked = [0, 1, 2, 3, 4, 5].sort(function (a, b) { return ev[b] - ev[a] || worst[b] - worst[a]; });
     return {
       known: !!pl, nFights: entries.length, extraSeen: !!extra, lastResult: lastResult,
+      tend: tend, counts: counts, mostPlayed: mostPlayed, pModel: pModel, lastRound: latest ? latest.round : null,
       theirCanon: c.canon, theirLastPerm: prevPerms.length ? prevPerms[prevPerms.length - 1] : null,
       myCanon: mc.canon, shownPerm: shownPerm, myCurrentPerm: mc.perm,
       p: p, weights: w, experts: d, rematch: rm, Wme: Wme, ev: ev, worst: worst, worstAgainst: worstAgainst,
@@ -1151,7 +1166,7 @@ details[open] > summary { margin-bottom: 10px; }
   var api = {
     TYPES: TYPES, TYPE_NAME: TYPE_NAME, BEATS: BEATS, PERMS: PERMS, EXPERTS: EXPERTS, EXPERT_INFO: EXPERT_INFO, REMATCH_INFO: REMATCH_INFO,
     rematchDist: rematchDist, fitRematch: fitRematch, fullDist: fullDist, blend: blend,
-    DEFAULT_W: DEFAULT_W, DEFAULTS: DEFAULTS,
+    DEFAULT_W: DEFAULT_W, DEFAULTS: DEFAULTS, TEND: TEND,
     normType: normType, normPower: normPower, normSquads: normSquads, normBattle: normBattle, battleKey: battleKey, keyOf: keyOf,
     canonical: canonical, matchPerm: matchPerm, orderSquads: orderSquads, strongestIndex: strongestIndex,
     extrasOf: extrasOf, moveOverlord: moveOverlord, mainType: mainType, bestGeared: bestGeared, eff: eff, spread: spread, LEGACY: LEGACY, keepShare: keepShare,
@@ -1701,6 +1716,24 @@ details[open] > summary { margin-bottom: 10px; }
     const src = me && me.entries.length ? me.entries[me.entries.length - 1].form : mf;
     return { k: E.matchPerm(src, mc), fromLog: !!(me && me.entries.length) };
   }
+  // The last round with a report, over every group.
+  let LRK = null, LRV = 0;
+  function lastRound() {
+    const ix = fullIndex();
+    if (LRK !== FIK) { LRK = FIK; LRV = ix.battles.reduce((m, b) => Math.max(m, +b.round || 0), 0); }
+    return LRV;
+  }
+  // The order a player has used most in the reports (a tie goes to the more recent one), on their latest squads.
+  function usualOf(pl) {
+    if (!pl || !pl.entries.length) return null;
+    const c = E.canonical(pl.entries[pl.entries.length - 1].form).canon, ks = pl.entries.map((e) => E.matchPerm(e.form, c)), counts = [0, 0, 0, 0, 0, 0];
+    ks.forEach((k) => { counts[k]++; });
+    let top = null, run = 0;
+    for (let i = ks.length - 1; i >= 0; i--) if (top == null || counts[ks[i]] > counts[top]) top = ks[i];
+    const lastK = ks[ks.length - 1];
+    for (let i = ks.length - 1; i >= 0 && ks[i] === lastK; i--) run++;
+    return { k: top, n: counts[top], of: ks.length, form: E.orderSquads(c, top), counts, lastK, run, lastForm: E.orderSquads(c, lastK) };
+  }
   function players() {
     const m = model();
     return Object.values(m.index.players).filter((p) => p.key !== m.meKey).map((p) => {
@@ -2072,6 +2105,12 @@ details[open] > summary { margin-bottom: 10px; }
     });
     let notes = '';
     if (isDemo()) notes += '<div class="note"><p><b>Example data.</b> These fights are made up so you can see how the tracker works. Log your own battle reports, or send them to Claude to import, and this goes away.</p><button class="btn small" data-act="real">Use my own data</button></div>';
+    const lr = isDemo() ? 0 : lastRound();
+    if (lr) {
+      let when = '';
+      try { if (S.race && S.race.asOf && S.race.round === lr) when = new Date(S.race.asOf).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); } catch (e) { when = ''; }
+      notes += `<div class="note asof" id="asof"><p><b>Reports through round ${lr}.</b> Today's matches are not included until the day's rounds are complete. Reports are added once a day${when ? ` (last update ${esc(when)})` : ''}.</p></div>`;
+    }
     if (S.note) notes += `<div class="note${S.noteErr ? ' err' : ''}"><p>${esc(S.note)}</p><button class="btn small" data-act="dismiss">Dismiss</button></div>`;
     document.getElementById('notes').innerHTML = notes;
     // Typing suggestions for the free-text name boxes; rebuilt only when the log changes.
@@ -2110,7 +2149,7 @@ details[open] > summary { margin-bottom: 10px; }
       if (!S.oppEdited || (pl && v && pl.entries.some((e) => E.sameForm(v, e.form)))) setOpp(S.opp);
       else S.oppVersion = S.version;
     }
-    const latest = pl ? pl.entries[pl.entries.length - 1] : null;
+    const latest = pl ? pl.entries[pl.entries.length - 1] : null, usual = usualOf(pl);
     const mine = myLog(), meName = settings().me, hasLog = ix.battles.length > 0;
     const likely = likelyOpps().filter((x) => key(x.name) !== key(S.opp));
     const src = isDemo() ? 'example squads' : valid(S.personal.myForm) ? 'entered by hand' + (mine ? ' · <button type="button" class="linkbtn" data-act="melog">Use my latest battle report</button>' : '') : mine ? `from your round ${esc(mine.round)} report` : '';
@@ -2125,17 +2164,18 @@ details[open] > summary { margin-bottom: 10px; }
       <div class="field"><label class="lbl" for="me-pick">You</label>${meSelect('me-pick')}${meNote}${raceLine}</div>
       <div class="vsd" aria-hidden="true">vs</div>
       <div class="field"><label class="lbl" for="opp-pick">Opponent</label>${oppSelect()}</div>
-      ${likely.length ? `<div class="stack"><span class="lbl">${likely[0].chance != null ? 'Likely next round' : 'Likely next, by record'}</span><div class="quick flow" role="group" aria-label="Likely next opponents">${likely.map((x) => `<button type="button" class="btn small" data-act="opp" data-name="${esc(x.name)}">${esc(short(x.name.replace(/^\[Example\] /, '')))} <span class="rec">${x.chance != null ? pct(x.chance) : `${x.w}–${x.l}`}</span></button>`).join('')}</div></div>` : ''}`;
+      ${likely.length ? `<div class="stack"><span class="lbl">${likely[0].chance != null ? (S.race && S.race.round ? `Likely opponent in round ${S.race.round + 1}` : 'Likely opponents') : 'Likely opponents, by record'}</span><div class="quick flow" role="group" aria-label="Likely next opponents">${likely.map((x) => `<button type="button" class="btn small" data-act="opp" data-name="${esc(x.name)}">${esc(short(x.name.replace(/^\[Example\] /, '')))} <span class="rec">${x.chance != null ? pct(x.chance) : `${x.w}–${x.l}`}</span></button>`).join('')}</div></div>` : ''}`;
     const manualOpp = S.oppManual || (!!S.opp && !pl);
     if (S.opp || manualOpp) {
       const open = manualOpp || S.oppOpen || S.oppEdited;
-      opp += `<p class="meta">${latest ? `Last logged: round ${esc(latest.round)}, ${latest.won ? 'won' : 'lost'} against ${esc(latest.oppName)}.` : 'Not in the log yet. Enter the formation their battle record shows.'}</p>`;
+      opp += `<p class="meta">${latest ? `On record: ${plural(pl.entries.length, 'fight')}, through round ${esc(latest.round)}.` : 'Not in the log yet. Enter the formation their battle record shows.'}</p>`;
       opp += keyFacts(pl);
       if (!open) {
-        opp += `<div class="stack"><div class="lbl"><span>Their last formation</span><span class="hint">Slot 1 fights first</span></div>${orderHTML(valid(S.oppForm) || latest.form)}
-          <p class="meta">Game shows a newer one? <button type="button" class="linkbtn" data-act="oedit">Edit it</button></p></div>`;
+        opp += `<div class="stack"><div class="lbl"><span>Their usual order</span><span class="hint">${usual ? `${usual.n} of ${plural(usual.of, 'fight')}` : 'Slot 1 fights first'}</span></div>${orderHTML(usual ? usual.form : valid(S.oppForm) || latest.form)}
+          ${usual && usual.lastK !== usual.k ? `<p class="meta" id="lately">Lately they switched: ${minis(usual.lastForm)} in their last ${plural(usual.run, 'reported fight')}.</p>` : ''}
+          <p class="meta">Slot 1 fights first. If the game shows a different order for them now, <button type="button" class="linkbtn" data-act="oedit">enter it</button> for a sharper call.</p></div>`;
       } else {
-        opp += `<div class="lbl"><span>Their last formation</span><span class="hint">Slot 1 fights first · squad power without troops</span></div>
+        opp += `<div class="lbl"><span>The order the game shows for them now</span><span class="hint">Slot 1 fights first · squad power without troops</span></div>
       ${slots('opp', draftOf('opp'))}
       <div class="lbl"><span>Their last result</span></div>
       <div class="seg" role="group" aria-label="Their last result">
@@ -2154,8 +2194,8 @@ details[open] > summary { margin-bottom: 10px; }
       const mc = E.canonical(mf).canon, ds = defaultShown(mf);
       const shownK = S.shownPerm != null ? S.shownPerm : ds.k;
       you += `<div class="field"><label class="lbl" for="shown">What they'll see of you</label>
-        <select id="shown">${E.PERMS.map((_, k) => `<option value="${k}"${k === shownK ? ' selected' : ''}>${esc(permText(mc, k))}${k === ds.k ? (ds.fromLog ? ' (last fight)' : ' (current)') : ''}</option>`).join('')}</select>
-        <p class="meta">They see the formation from your last fight, the same way you see theirs.</p></div>`;
+        <select id="shown">${E.PERMS.map((_, k) => `<option value="${k}"${k === shownK ? ' selected' : ''}>${esc(permText(mc, k))}${k === ds.k ? (ds.fromLog ? ' (latest report)' : ' (current)') : ''}</option>`).join('')}</select>
+        <p class="meta">They see the order from your last fight. If you have fought since your latest report, pick the order you used last.</p></div>`;
       const of = borrowX(valid(S.oppForm), pl);
       if (S.opp && of) {
         if (modelReady()) pr = E.predict(model(), { opp: S.opp, oppForm: S.oppEdited ? of : null, oppLastResult: S.oppResult, myForm: mf, myShown: E.orderSquads(mc, shownK) });
@@ -2393,13 +2433,14 @@ details[open] > summary { margin-bottom: 10px; }
     return `<section class="card hero c-hero" aria-labelledby="h-hero">
       <div class="card-h"><h2 id="h-hero">Play this order</h2><span class="stamp">vs ${esc(short(S.opp))}</span></div>
       ${permHTML(pr.myCanon, b, true)}
-      <div class="big-row"><span class="big-num">${pct(ev)}</span><span class="cap">chance to win if they play the way the model expects</span></div>
+      <div class="big-row"><span class="big-num">${pct(ev)}</span><span class="cap">chance to win, going by how they have lined up so far</span></div>
+      ${pr.tend ? `<p class="meta" id="built-on">Built on their tendencies in ${plural(pr.nFights, 'reported fight')}, through round ${esc(pr.lastRound)}. Anything they have played since is not included.</p>` : pr.known ? `<p class="meta" id="built-on">Built on their ${plural(pr.nFights, 'reported fight')} and the order you entered from the game.</p>` : ''}
       ${strengthNote(pr)}
       ${pointsLine(pr, plan)}
       ${ovLine(ovi)}
-      ${ev >= 0.35 && ev <= 0.65 ? '<p class="callout key"><b>Key match:</b> about even. Toss-ups like this decide the top 8, so check their latest formation in the game before you lock in.</p>' : ''}
+      ${ev >= 0.35 && ev <= 0.65 ? '<p class="callout key"><b>Key match:</b> about even. Toss-ups like this decide the top 8, so check the order the game shows for them before you lock in.</p>' : ''}
       ${lopsided ? `<p class="callout">${lopsided}</p>` : `<p class="callout">Worst case ${pct(pr.worst[b])}, if they play ${minis(E.orderSquads(pr.theirCanon, pr.worstAgainst[b]))}. ${gain < 0.02 ? 'Reading this player barely helps here, so the safe mix below is about as good.' : `The safe mix only guarantees ${pct(pr.nash.value)}.`}</p>`}
-      <div class="scroll"><table><thead><tr><th>Other orders</th>${plan && plan.exp ? '<th>Points</th>' : ''}<th>If predicted</th>${pr.byPoints > 1 ? '' : '<th>Worst case</th>'}</tr></thead><tbody>
+      <div class="scroll"><table><thead><tr><th>Other orders</th>${plan && plan.exp ? '<th>Points</th>' : ''}<th>Win chance</th>${pr.byPoints > 1 ? '' : '<th>Worst case</th>'}</tr></thead><tbody>
         ${others.map((k) => `<tr><td>${permHTML(pr.myCanon, k)}</td>${plan && plan.exp ? `<td>${kpts(plan.exp[k])}</td>` : ''}<td>${pct(pr.ev[k])}</td>${pr.byPoints > 1 ? '' : `<td>${pct(pr.worst[k])}</td>`}</tr>`).join('')}
       </tbody></table></div>
       <p class="foot">Points are what the order is expected to score against the orders they are likely to play. Whatever you play now becomes the formation your next opponent sees.</p>
@@ -2409,20 +2450,29 @@ details[open] > summary { margin-bottom: 10px; }
     const order = E.PERMS.map((_, k) => k).sort((a, b) => pr.p[b] - pr.p[a]);
     const top = order[0];
     let lead;
-    if (pr.theirLastPerm == null) lead = `Most likely order: ${pct(pr.p[top])}.`;
-    else if (pr.theirLastPerm === top) lead = `Most likely they repeat their last order (${pct(pr.p[top])}).`;
-    else lead = `Most likely they switch away from their last order (${pct(pr.p[top])} on the top pick).`;
-    const basis = pr.known
-      ? `Based on ${plural(pr.nFights, 'logged fight')}${pr.extraSeen ? ' plus the formation you entered' : ''}. Players with few fights lean on how your whole log behaves.`
-      : 'No fights logged for this player, so this uses how opponents in your log usually play.';
+    if (pr.tend) {
+      const mp = pr.mostPlayed, mpTxt = `Most played: ${minis(E.orderSquads(pr.theirCanon, mp))} in ${pr.counts[mp]} of their ${plural(pr.nFights, 'reported fight')}`;
+      if (top === mp) lead = `${mpTxt}. About ${pct(pr.p[top])} they play it again.`;
+      else if (top === pr.theirLastPerm) lead = `${mpTxt}, but their latest reports show ${minis(E.orderSquads(pr.theirCanon, top))}. About ${pct(pr.p[top])} they stay with it, ${pct(pr.p[mp])} they go back.`;
+      else lead = `${mpTxt}. Against what they will see of you, the call leans to ${minis(E.orderSquads(pr.theirCanon, top))} (${pct(pr.p[top])}).`;
+    }
+    else if (pr.theirLastPerm == null) lead = `Most likely order: ${pct(pr.p[top])}.`;
+    else if (pr.theirLastPerm === top) lead = `Most likely they repeat the order the game shows now (${pct(pr.p[top])}).`;
+    else lead = `Most likely they switch away from the order the game shows now (${pct(pr.p[top])} on the top pick).`;
+    const basis = pr.tend
+      ? `The odds blend how they tend to decide (${pct(E.TEND.model)}), how often they have played each order (${pct(E.TEND.freq)}) and room for a surprise (${pct(E.TEND.even)}), from ${plural(pr.nFights, 'reported fight')} through round ${esc(pr.lastRound)}. Anything they have played since is not included.`
+      : pr.known
+      ? `Based on ${plural(pr.nFights, 'reported fight')} plus the order you entered. Players with few fights lean on how the whole log behaves.`
+      : 'No fights on record for this player, so this uses how opponents in the log usually play.';
+    const tagOf = (k) => (pr.tend ? (pr.counts[k] ? `<span class="tag">${pr.counts[k]} of ${pr.nFights}</span>` : '') : k === pr.theirLastPerm ? '<span class="tag">Shown now</span>' : '');
     const rm = pr.rematch;
     const rmBox = rm ? `<div class="rematch"><p><span class="tag hot">Rematch</span> In round ${esc(rm.round)} they played ${minis(rm.theirForm)} against your ${minis(rm.myForm)} and ${rm.theyWon ? 'won' : 'lost'}. ${rm.theyWon ? 'A player who remembers would replay the order that beat you.' : 'A player who remembers would counter the order that beat them.'}</p>
       <p class="meta">The model gives that ${pct(rm.r)} weight, ${rm.n ? `from their ${plural(rm.n, 'earlier rematch')} and your whole log` : 'from how players in your log handle rematches'}.</p></div>` : '';
     return `<section class="card c-pred" aria-labelledby="h-pred">
-      <div class="card-h"><h2 id="h-pred">Their likely order</h2></div>
+      <div class="card-h"><h2 id="h-pred">Their tendencies</h2></div>
       <p class="lead">${lead}</p>
       ${rmBox}
-      <div class="stack">${order.map((k, i) => `<div class="prow${i === 0 ? ' top' : ''}"><span class="row">${permHTML(pr.theirCanon, k)}${k === pr.theirLastPerm ? '<span class="tag">Last played</span>' : ''}</span><div class="bar${i ? ' muted' : ''}"><i style="width:${(pr.p[k] * 100).toFixed(1)}%"></i></div><span class="pct">${pct(pr.p[k])}</span></div>`).join('')}</div>
+      <div class="stack">${order.map((k, i) => `<div class="prow${i === 0 ? ' top' : ''}"><span class="row">${permHTML(pr.theirCanon, k)}${tagOf(k)}</span><div class="bar${i ? ' muted' : ''}"><i style="width:${(pr.p[k] * 100).toFixed(1)}%"></i></div><span class="pct">${pct(pr.p[k])}</span></div>`).join('')}</div>
       <div class="lbl"><span>How they decide</span></div>
       <div class="stack">${tendRows(pr.weights, rm ? rm.r : 0)}</div>
       <p class="foot">${basis}</p>
@@ -2458,14 +2508,15 @@ details[open] > summary { margin-bottom: 10px; }
     const scored = calls.filter(Boolean), hits = scored.filter((c) => c.hit).length;
     const latest = p.entries[p.entries.length - 1];
     const left = `<section class="card"><div class="card-h"><h2>Opponents</h2><span class="aside">${list.length}</span></div>
-      <div class="plist">${list.map((q) => `<button type="button" data-act="sel" data-k="${esc(q.key)}" aria-current="${q.key === sk}"><span class="nm"><span>${esc(q.name)}${profTag(q.name, true)}</span><span class="meta">${q.w}–${q.n - q.w}</span></span><span class="row">${minis(q.last.form)}<span class="meta">${E.EXPERT_INFO[topTendency(m.playerW[q.key])].label}</span></span></button>`).join('')}</div></section>`;
+      <div class="plist">${list.map((q) => `<button type="button" data-act="sel" data-k="${esc(q.key)}" aria-current="${q.key === sk}"><span class="nm"><span>${esc(q.name)}${profTag(q.name, true)}</span><span class="meta">${q.w}–${q.n - q.w}</span></span><span class="row">${minis((usualOf(m.index.players[q.key]) || { form: q.last.form }).form)}<span class="meta">${E.EXPERT_INFO[topTendency(m.playerW[q.key])].label}</span></span></button>`).join('')}</div></section>`;
     const rows = p.entries.map((e, t) => ({ e, t })).reverse().map(({ e, t }) => {
       const o = obs[t], c = calls[t];
       const call = c ? (c.hit ? '<span class="ok">Right</span>' : `<span class="bad">Missed</span> ${minis(E.orderSquads(o.canon, c.top))}`) : '<span class="meta">First fight</span>';
       return `<tr><td class="num">${esc(e.round)}</td><td>${orderHTML(e.form)}</td><td>${esc(e.oppName)}${profTag(e.oppName, true)}${o.rm ? ' <span class="tag">Rematch</span>' : ''}</td><td>${o.seen.proxy ? '<span class="meta" title="Their opponent’s earlier fight isn’t logged, so this shows what that opponent played here">~</span> ' : ''}${minis(o.seen.lastForm)}</td><td>${e.won ? '<span class="pill w">Won</span>' : '<span class="pill l">Lost</span>'}</td><td>${call}</td></tr>`;
     }).join('');
     const right = `<section class="card"><div class="card-h"><h2>${esc(p.name)}${profTag(p.name)}</h2><button type="button" class="btn small primary" data-act="scout" data-name="${esc(p.name)}">Scout as next opponent</button></div>
-      <div class="row"><span class="lbl">Latest order</span>${orderHTML(latest.form)}</div>
+      <div class="row"><span class="lbl">Usual order</span>${orderHTML(usualOf(p).form)}<span class="meta">${usualOf(p).n} of ${plural(usualOf(p).of, 'fight')}, through round ${esc(latest.round)}</span></div>
+      ${usualOf(p).lastK !== usualOf(p).k ? `<p class="meta">Lately they switched: ${minis(usualOf(p).lastForm)} in their last ${plural(usualOf(p).run, 'reported fight')}.</p>` : ''}
       ${hasX(latest.form) ? `<p class="meta">True strength: ${effLine(latest.form)} · ${fmtP(effSum(latest.form))}M in all (${fmtP(latest.form.reduce((n, q) => n + q.p, 0))}M listed)</p>` : ''}
       <div class="lbl"><span>How they decide</span><span class="hint">${scored.length ? `Model called ${hits} of ${scored.length} of their fights right` : 'Needs two fights to test the model'}</span></div>
       <div class="stack">${tendRows(w)}</div>
@@ -2548,7 +2599,8 @@ details[open] > summary { margin-bottom: 10px; }
     const track = `<section class="card"><div class="card-h"><h2>Model track record</h2></div>
       ${W.n ? `<div class="big-row"><span class="big-num">${pct(W.acc)}</span><span class="cap">of logged fights where the model's top pick was the order they actually played</span></div>
         <div>${stat('Guessing they repeat their last order', pct(W.repeatAcc))}${W.rmN ? stat(`On rematches only <span class="meta">(${W.rmN})</span>`, pct(W.rmHits / W.rmN)) : ''}${stat('Blind guess', '17%')}${stat('Average odds it gave the order they played', pct(W.avgP))}</div>
-        <p class="meta">Each fight is called using only the fights before it, over ${plural(W.n, 'call')}.</p>` : '<p>Needs players with at least two logged fights.</p>'}</section>`;
+        <p class="meta">Each fight is called using only the fights before it, over ${plural(W.n, 'call')}.</p>
+        <p class="meta" id="stale-note">Reports arrive once a day, so on Next fight a day's fights are called from the days before. Tested that way on days 2 and 3, the top pick was right 69% of the time (6,192 calls). Entering the order the game shows for them brings it back up.</p>` : '<p>Needs players with at least two logged fights.</p>'}</section>`;
     const mine = m.obsBy[m.meKey] || [];
     let me = '<section class="card"><div class="card-h"><h2>How readable you are</h2></div>';
     if (mine.length >= 2) {
