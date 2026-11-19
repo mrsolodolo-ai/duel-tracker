@@ -1716,6 +1716,9 @@ details[open] > summary { margin-bottom: 10px; }
     const src = me && me.entries.length ? me.entries[me.entries.length - 1].form : mf;
     return { k: E.matchPerm(src, mc), fromLog: !!(me && me.entries.length) };
   }
+  // The qualifier has 32 rounds (race.json says so too, once it has loaded). After the last one there is no next round to forecast.
+  const QUAL_ROUNDS = 32;
+  const qualDone = () => lastRound() >= ((S.race && S.race.rounds) || QUAL_ROUNDS);
   // The last round with a report, over every group.
   let LRK = null, LRV = 0;
   function lastRound() {
@@ -2109,7 +2112,10 @@ details[open] > summary { margin-bottom: 10px; }
     if (lr) {
       let when = '';
       try { if (S.race && S.race.asOf && S.race.round === lr) when = new Date(S.race.asOf).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); } catch (e) { when = ''; }
-      notes += `<div class="note asof" id="asof"><p><b>Reports through round ${lr}.</b> Today's matches are not included until the day's rounds are complete. Reports are added once a day${when ? ` (last update ${esc(when)})` : ''}.</p></div>`;
+      const lastQ = (S.race && S.race.rounds) || QUAL_ROUNDS;
+      notes += lr >= lastQ
+        ? `<div class="note asof" id="asof"><p><b>Reports through round ${lr}, the last qualifier round${when ? ` (last update ${esc(when)})` : ''}.</b> Matches played after that are not included until their reports are added: once a day, after the day's rounds are complete.</p></div>`
+        : `<div class="note asof" id="asof"><p><b>Reports through round ${lr}.</b> Today's matches are not included until the day's rounds are complete. Reports are added once a day${when ? ` (last update ${esc(when)})` : ''}.</p></div>`;
     }
     if (S.note) notes += `<div class="note${S.noteErr ? ' err' : ''}"><p>${esc(S.note)}</p><button class="btn small" data-act="dismiss">Dismiss</button></div>`;
     document.getElementById('notes').innerHTML = notes;
@@ -2151,10 +2157,13 @@ details[open] > summary { margin-bottom: 10px; }
     }
     const latest = pl ? pl.entries[pl.entries.length - 1] : null, usual = usualOf(pl);
     const mine = myLog(), meName = settings().me, hasLog = ix.battles.length > 0;
-    const likely = likelyOpps().filter((x) => key(x.name) !== key(S.opp));
+    const noNext = !isDemo() && qualDone();
+    const likely = noNext ? [] : likelyOpps().filter((x) => key(x.name) !== key(S.opp));
     const src = isDemo() ? 'example squads' : valid(S.personal.myForm) ? 'entered by hand' + (mine ? ' · <button type="button" class="linkbtn" data-act="melog">Use my latest battle report</button>' : '') : mine ? `from your round ${esc(mine.round)} report` : '';
     const rx = raceOf(meName);
-    const raceLine = rx ? `<p class="meta">Top 8 chance: <b>${pct(rx.r[3])}</b> · #${rx.i + 1} in group ${esc(rx.g)} · <a href="#race">The race</a></p>` : '';
+    const raceLine = !rx ? '' : noNext
+      ? `<p class="meta">Finished <b>${ordinal(rx.i + 1)}</b> in group ${esc(rx.g)}${rx.r[3] >= 0.5 ? ' · through to the semi-finals' : ''} · <a href="#race">Top 8</a></p>`
+      : `<p class="meta">Top 8 chance: <b>${pct(rx.r[3])}</b> · #${rx.i + 1} in group ${esc(rx.g)} · <a href="#race">The race</a></p>`;
     const meNote = mf ? `<div class="row">${orderHTML(mf)}<span class="meta">${src}</span></div>`
       : meName ? `<p class="meta">No fights are on record under this name yet, so there is nothing to simulate.</p>`
       : `<p class="meta">${hasLog ? 'Your squads fill in from your latest battle report.' : 'Your squads fill in once battle reports are loaded.'}</p>`;
@@ -2312,7 +2321,7 @@ details[open] > summary { margin-bottom: 10px; }
     const meK = key(settings().me), met = es.filter((e) => e.oppKey === meK);
     if (met.length) { const last = met[met.length - 1]; facts.push({ t: `Rematch: you ${last.won ? 'lost' : 'won'} round ${last.round}`, hot: true }); }
     const orx = raceOf(pl.name);
-    if (orx) facts.push({ t: `Top 8 chance ${pct(orx.r[3])}`, hot: false });
+    if (orx) facts.push({ t: qualDone() ? `Finished ${ordinal(orx.i + 1)} in group ${orx.g}${orx.r[3] >= 0.5 ? ', through' : ''}` : `Top 8 chance ${pct(orx.r[3])}`, hot: false });
     facts.push({ t: orx ? `${recOf(orx.r, S.race.round)} record` : `${wins}–${n - wins} record`, hot: false });
     return `<div class="facts" role="list" aria-label="Key facts">${facts.map((f) => `<span role="listitem" class="fact${f.hot ? ' hot' : ''}">${esc(f.t)}</span>`).join('')}</div>`;
   }
@@ -2600,7 +2609,7 @@ details[open] > summary { margin-bottom: 10px; }
       ${W.n ? `<div class="big-row"><span class="big-num">${pct(W.acc)}</span><span class="cap">of logged fights where the model's top pick was the order they actually played</span></div>
         <div>${stat('Guessing they repeat their last order', pct(W.repeatAcc))}${W.rmN ? stat(`On rematches only <span class="meta">(${W.rmN})</span>`, pct(W.rmHits / W.rmN)) : ''}${stat('Blind guess', '17%')}${stat('Average odds it gave the order they played', pct(W.avgP))}</div>
         <p class="meta">Each fight is called using only the fights before it, over ${plural(W.n, 'call')}.</p>
-        <p class="meta" id="stale-note">Reports arrive once a day, so on Next fight a day's fights are called from the days before. Tested that way on days 2 and 3, the top pick was right 69% of the time (6,192 calls). Entering the order the game shows for them brings it back up.</p>` : '<p>Needs players with at least two logged fights.</p>'}</section>`;
+        <p class="meta" id="stale-note">Reports arrive once a day, so on Next fight a day's fights are called from the days before. Tested that way on days 2, 3 and 4, the top pick was right 69% of the time (9,050 calls). Entering the order the game shows for them brings it back up.</p>` : '<p>Needs players with at least two logged fights.</p>'}</section>`;
     const mine = m.obsBy[m.meKey] || [];
     let me = '<section class="card"><div class="card-h"><h2>How readable you are</h2></div>';
     if (mine.length >= 2) {
@@ -2839,21 +2848,23 @@ details[open] > summary { margin-bottom: 10px; }
     const me = settings().me, st = S.raceState;
     const title = (aside) => `<div class="card-h"><h2>Top 8</h2>${aside ? `<span class="aside">${aside}</span>` : ''}</div>`;
     if (st !== 'ok') return `<section class="card">${title()}<div class="empty">${st === 'none' ? "Top-8 odds aren't available right now." : 'Loading the standings…'}</div></section>`;
-    const R = S.race, left = R.rounds - R.round, played = R.round, asOf = `after round ${R.round} of ${R.rounds}`;
+    const R = S.race, left = R.rounds - R.round, played = R.round, done = left <= 0, asOf = done ? `final, all ${R.rounds} rounds played` : `after round ${R.round} of ${R.rounds}`;
     const x = raceOf(me);
     if (!x) return `<section class="card">${title(asOf)}<div class="empty">${me ? `${esc(me)} isn't in the qualifier standings.` : 'Pick your name on Next fight to see your chance of making the top 8.'}</div></section>`;
     const { G, r, g } = x, chance = r[3];
     const cut = `${fmtK(G.cut[1])} (likely ${fmtK(G.cut[0])}–${fmtK(G.cut[2])})`;
     let verdict;
-    if (chance >= 0.99) verdict = `You're all but through. 8th place is likely to finish around ${cut}; your simulated finish averages ${fmtK(r[4])}.`;
+    if (done) verdict = `The qualifier is over. ${esc(r[0])} finished ${estd(r) ? 'about ' : ''}${ordinal(x.i + 1)} in group ${esc(g)}${chance >= 0.5 ? ' and goes on to the semi-finals' : '; the top 8 go on to the semi-finals'}. 8th place finished on ${fmtK(G.cut[1])}.`;
+    else if (chance >= 0.99) verdict = `You're all but through. 8th place is likely to finish around ${cut}; your simulated finish averages ${fmtK(r[4])}.`;
     else if (chance < 0.01) verdict = `On current squad strength the top 8 is out of reach: 8th place is likely to finish around ${cut}, and your simulated finish averages ${fmtK(r[4])}. Every point still counts for your final place, so play for kills in fights you can't win.`;
     else {
       const w = winsNeeded(x);
       verdict = `8th place is likely to finish around ${cut}. From ${scoreOf(r)} that takes about <b>${Math.min(w, left)} wins in your last ${left} fights</b>${w > left ? ' and some luck' : ''}. A win is worth about ${fmtK(r[5] || 1080)} to you, a loss about ${fmtK(r[6] || 330)}.`;
     }
     const head = `<section class="card">${title(`group ${esc(g)} · ${asOf}`)}
-      <div class="big-row"><span class="big-num">${pct(chance)}</span><span class="cap">chance ${esc(r[0])} finishes in the top 8 of group ${esc(g)}</span></div>
-      <div>${stat('Now', `${estd(r) ? 'about ' : ''}#${x.i + 1} in the group · ${scoreOf(r)} · ${recOf(r, played)}`)}${profOf(r[0]) ? stat('Profession', PROF[profOf(r[0])]) : ''}${stat('Rounds left', `${left}, 8 a day`)}</div>
+      ${done ? `<div class="big-row"><span class="big-num">#${x.i + 1}</span><span class="cap">${esc(r[0])}'s final place in group ${esc(g)}${chance >= 0.5 ? ': through to the semi-finals' : ''}</span></div>`
+        : `<div class="big-row"><span class="big-num">${pct(chance)}</span><span class="cap">chance ${esc(r[0])} finishes in the top 8 of group ${esc(g)}</span></div>`}
+      <div>${stat(done ? 'Final' : 'Now', `${estd(r) ? 'about ' : ''}#${x.i + 1} in the group · ${scoreOf(r)} · ${recOf(r, played)}`)}${profOf(r[0]) ? stat('Profession', PROF[profOf(r[0])]) : ''}${done ? '' : stat('Rounds left', `${left}, 8 a day`)}</div>
       <p>${verdict}</p>${estd(r) ? `<p class="meta">The game only shows current scores for a group's top 16. Your score here is what you had the last time you fought one of them, plus an estimate for the ${plural(r[8], 'round')} since.</p>` : ''}</section>`;
     const opps = r[7].slice().sort((a, b) => b[1] - a[1]);
     const keyN = opps.filter((o) => o[3] >= 0.35 && o[3] < 0.65).length, killN = opps.filter((o) => o[3] < 0.1).length;
@@ -2868,12 +2879,12 @@ details[open] > summary { margin-bottom: 10px; }
     const rows = G.p.map((p, i) => ({ p, i })).filter((o) => o.p[3] >= 0.01 || o.i < 12 || o.i === x.i).sort((a, b) => b.p[3] - a.p[3] || a.i - b.i);
     const THPX = fullIndex().players;
     const thpOf = (name) => { const pl = THPX[key(name)], last = pl && pl.entries.length ? pl.entries[pl.entries.length - 1] : null, v = last ? last.form.reduce((acc, q) => acc + (+q.p || 0), 0) : 0; return v ? `${Math.round(v)}M` : '–'; };
-    const raceCard = `<section class="card"><div class="card-h"><h2>Group ${esc(g)} race</h2><span class="aside">top 8 advance</span></div>
-      <div class="scroll"><table class="race"><thead><tr><th>Player <span class="meta">(place now)</span></th><th>Top 8</th><th>Record</th><th>Score</th><th title="Total hero power: the listed power of their three squads">THP</th></tr></thead><tbody>
+    const raceCard = `<section class="card"><div class="card-h"><h2>Group ${esc(g)} ${done ? 'final standings' : 'race'}</h2><span class="aside">top 8 advance</span></div>
+      <div class="scroll"><table class="race"><thead><tr><th>Player <span class="meta">(${done ? 'final place' : 'place now'})</span></th><th>Top 8</th><th>Record</th><th>Score</th><th title="Total hero power: the listed power of their three squads">THP</th></tr></thead><tbody>
       ${rows.map((o) => `<tr class="${o.i === x.i ? 'me' : ''}"><td><span class="meta">#${o.i + 1}</span> ${esc(short(o.p[0]))}${profTag(o.p[0], true)}</td><td><span class="racebar"><span class="bar"><i style="width:${(o.p[3] * 100).toFixed(1)}%"></i></span><span class="pct">${pct(o.p[3])}</span></span></td><td>${recOf(o.p, played)}</td><td>${scoreOf(o.p)}</td><td>${thpOf(o.p[0])}</td></tr>`).join('')}
       </tbody></table></div>
-      <p class="foot">${R.runs.toLocaleString()} simulated runs of the last ${left} rounds. Each fight uses both players' latest squads and troops, mostly in their usual order. Pairing follows the standings in blocks of 16 places, as it did on days 1–2: in round 9, 87% of top-16 players met another top-16 player. Tested on day 2, starting from the round-8 standings: of the players it gave 75–95%, 78% made the top 8; of those it gave under 5%, none did. It expected 74 players from outside a top 16 to break into one, and 78 did. Every squad fights at its true strength, read off its stat sheet in the battle reports, so listed power is only where it starts. It assumes squads stay as they are and everyone plays every round.${rows.some((o) => estd(o.p)) ? ' ~ marks players outside the top 16: the game only shows their score from the last time they fought a top-16 player, so the rounds since are estimated and can never put them above 16th place.' : ''} Points: a loss scores 66 per enemy troop killed; a win scores 300,000 plus 66 per enemy troop killed and per troop you keep. THP is the listed power of a player's three squads in their latest fight; what they really fight like is the Strength column on Standings. ${PROF_KEY}</p></section>`;
-    return `<div class="grid2"><div class="stack" style="gap:16px">${head}${oppCard}</div><div class="stack" style="gap:16px">${raceCard}</div></div>`;
+      <p class="foot">${done ? `Final standings: all ${R.rounds} qualifier rounds are played, and the top 8 of each group go on to the semi-finals.` : `${R.runs.toLocaleString()} simulated runs of the last ${left} rounds. Each fight uses both players' latest squads and troops, mostly in their usual order. Pairing follows the standings in blocks of 16 places, as it did on days 1–2: in round 9, 87% of top-16 players met another top-16 player. Tested on day 2, starting from the round-8 standings: of the players it gave 75–95%, 78% made the top 8; of those it gave under 5%, none did. It expected 74 players from outside a top 16 to break into one, and 78 did. Every squad fights at its true strength, read off its stat sheet in the battle reports, so listed power is only where it starts. It assumes squads stay as they are and everyone plays every round.`}${rows.some((o) => estd(o.p)) ? ' ~ marks players outside the top 16: the game only shows their score from the last time they fought a top-16 player, so the rounds since are estimated and can never put them above 16th place.' : ''} Points: a loss scores 66 per enemy troop killed; a win scores 300,000 plus 66 per enemy troop killed and per troop you keep. THP is the listed power of a player's three squads in their latest fight; what they really fight like is the Strength column on Standings. ${PROF_KEY}</p></section>`;
+    return `<div class="grid2"><div class="stack" style="gap:16px">${head}${done ? '' : oppCard}</div><div class="stack" style="gap:16px">${raceCard}</div></div>`;
   }
   // When no order wins: the order that scores the most points, i.e. kills the most of their troops.
   // Troops by team id with the Overlord (and the troops it brings) moved to another team.
@@ -2946,9 +2957,9 @@ details[open] > summary { margin-bottom: 10px; }
     const st = S.raceState;
     const title = (h, aside) => `<div class="card-h"><h2>${h}</h2>${aside ? `<span class="aside">${aside}</span>` : ''}</div>`;
     if (st !== 'ok') return `<section class="card">${title('Standings')}<div class="empty">${st === 'none' ? "Standings aren't available right now." : 'Loading the standings…'}</div></section>`;
-    const R = S.race, adv = R.advance || 8, top = R.top || 16, played = R.round, asOf = `after round ${played} of ${R.rounds}`;
+    const R = S.race, adv = R.advance || 8, top = R.top || 16, played = R.round, done = played >= R.rounds, asOf = done ? `final, all ${R.rounds} rounds played` : `after round ${played} of ${R.rounds}`;
     const C = standingsRows(), all = C.rows, groups = Object.keys(R.groups).sort(), seeds = all.filter((x) => x.adv);
-    const hasProj = C.proj.length > 0; // likely seeds, once the simulation carries them
+    const hasProj = !done && C.proj.length > 0; // likely seeds, once the simulation carries them (nothing left to simulate after the last round)
     const scope = S.stScope === 'all' ? 'all' : S.stScope === 'proj' && hasProj ? 'proj' : 'seed';
     const grp = groups.indexOf(S.stGroup) >= 0 ? S.stGroup : '', find = (S.stFind || '').trim().toLowerCase();
     const meK = key(settings().me || ''), mine = meK ? all.find((x) => x.k === meK) || C.proj.find((x) => x.k === meK) : null;
@@ -2962,16 +2973,16 @@ details[open] > summary { margin-bottom: 10px; }
     // Your seed
     let head = '';
     if (mine) {
-      const likely = mine.r[9] ? stat(`Likely seed after round ${R.rounds}`, `${mine.r[9][1]}${mine.r[9][0] === mine.r[9][2] ? '' : ` (${range(mine)} in 8 runs out of 10)`}`) : '';
+      const likely = !done && mine.r[9] ? stat(`Likely seed after round ${R.rounds}`, `${mine.r[9][1]}${mine.r[9][0] === mine.r[9][2] ? '' : ` (${range(mine)} in 8 runs out of 10)`}`) : '';
       if (mine.adv) {
         const above = seeds[mine.seed - 2], below = seeds[mine.seed];
         head = `<section class="card">${title('Your seed', asOf)}
-          <div class="big-row"><span class="big-num">#${mine.seed}</span><span class="cap">of ${seeds.length}: where ${esc(mine.name)} would be seeded for the semi-finals if the qualifier ended now</span></div>
+          <div class="big-row"><span class="big-num">#${mine.seed}</span><span class="cap">${done ? `of ${seeds.length}: ${esc(mine.name)}'s seed for the semi-finals, by total score in the qualifier` : `of ${seeds.length}: where ${esc(mine.name)} would be seeded for the semi-finals if the qualifier ended now`}</span></div>
           <div>${stat(`Group ${esc(mine.g)}`, `${ordinal(mine.gi + 1)} · ${pts(mine)} · ${rec(mine)}`)}${above ? stat(`Seed ${above.seed}, just above`, `${esc(short(above.name))} · ${gap(above.score - mine.score)} ahead`) : ''}${below ? stat(`Seed ${below.seed}, just below`, `${esc(short(below.name))} · ${gap(mine.score - below.score)} behind`) : ''}${likely}</div></section>`;
       } else {
         const last = all.find((x) => x.g === mine.g && x.gi === adv - 1);
         head = `<section class="card">${title('Your seed', asOf)}
-          <p><b>${esc(mine.name)}</b> is ${mine.est ? 'about ' : ''}${ordinal(mine.gi + 1)} in group ${esc(mine.g)} with ${pts(mine)}. Only the top ${adv} of each group get a seed${last ? `: ${ordinal(adv)} place is ${esc(short(last.name))} at ${fmtS(last.score)}, ${gap(last.score - mine.score)} ahead` : ''}.${hasProj ? ` Chance of finishing in the top ${adv}: <b>${chance(mine)}</b>.` : ''}</p>${likely ? `<div>${likely}</div>` : ''}</section>`;
+          <p><b>${esc(mine.name)}</b> ${done ? 'finished' : 'is'} ${mine.est ? 'about ' : ''}${ordinal(mine.gi + 1)} in group ${esc(mine.g)} with ${pts(mine)}. Only the top ${adv} of each group get a seed${last ? `: ${ordinal(adv)} place is ${esc(short(last.name))} at ${fmtS(last.score)}, ${gap(last.score - mine.score)} ahead` : ''}.${hasProj ? ` Chance of finishing in the top ${adv}: <b>${chance(mine)}</b>.` : ''}</p>${likely ? `<div>${likely}</div>` : ''}</section>`;
       }
     }
 
@@ -2997,7 +3008,7 @@ details[open] > summary { margin-bottom: 10px; }
         : `Each group's top ${top}, ranked by total score across all groups. Players outside their group's top ${adv} are greyed out.`;
     const ctl = `<div class="st-ctl">
         <div class="seg" role="group" aria-label="Players shown">
-          <button type="button" data-act="stscope" data-v="seed" aria-pressed="${scope === 'seed'}">Seeds today</button>${hasProj ? `
+          <button type="button" data-act="stscope" data-v="seed" aria-pressed="${scope === 'seed'}">${done ? 'Seeds' : 'Seeds today'}</button>${hasProj ? `
           <button type="button" data-act="stscope" data-v="proj" aria-pressed="${scope === 'proj'}">Likely seeds</button>` : ''}
           <button type="button" data-act="stscope" data-v="all" aria-pressed="${scope === 'all'}">All top ${top}s</button>
         </div>
@@ -3008,8 +3019,8 @@ details[open] > summary { margin-bottom: 10px; }
     const table = list.length
       ? `<div class="scroll"><table class="stand"><thead><tr><th class="n">${head2[0]}</th><th>Player</th><th class="w">Profession</th><th class="w">Group</th><th class="w">Record</th><th class="${hasProj ? 'w' : ''}">Score</th>${hasProj ? `<th>${head2[1]}</th><th>${head2[2]}</th>` : ''}<th class="w" title="True strength of their three squads, with listed power in grey">Strength</th></tr></thead><tbody>${body}</tbody></table></div>`
       : `<div class="empty">${find ? `No player matches “${esc((S.stFind || '').trim())}”${grp ? ` in group ${esc(grp)}` : ''}.` : 'Nobody to show here.'}</div>`;
-    const foot = `Strength is the true strength of a player's three squads, read off their stat sheets in the latest battle report, with listed power in grey. Profession (War Leader or Engineer) is read from each player's latest battle report. The game only publishes current scores for each group's top ${top}, so those are the players with exact numbers. Seeds today show where things stand now and will move every round until round ${R.rounds}.${hasProj ? ` Top ${adv} is the chance of finishing in the group's top ${adv}. Likely seed is the middle result of ${R.runs.toLocaleString()} simulated runs of the last ${R.rounds - played} rounds, with the range it lands in 8 runs out of 10, counted when the player makes the top ${adv}; ~ marks a score estimated for a player outside the top ${top}.` : ''}`;
-    const card = `<section class="card">${title(scope === 'seed' ? 'Semi-final seeding today' : scope === 'proj' ? `Likely seeding after round ${R.rounds}` : 'Overall standings', `${grp ? `group ${esc(grp)} · ` : ''}${asOf}`)}
+    const foot = `Strength is the true strength of a player's three squads, read off their stat sheets in the latest battle report, with listed power in grey. Profession (War Leader or Engineer) is read from each player's latest battle report. The game only publishes current scores for each group's top ${top}, so those are the players with exact numbers. ${done ? 'The qualifier is over: these are the final scores and seeds.' : `Seeds today show where things stand now and will move every round until round ${R.rounds}.`}${hasProj ? ` Top ${adv} is the chance of finishing in the group's top ${adv}. Likely seed is the middle result of ${R.runs.toLocaleString()} simulated runs of the last ${R.rounds - played} rounds, with the range it lands in 8 runs out of 10, counted when the player makes the top ${adv}; ~ marks a score estimated for a player outside the top ${top}.` : ''}`;
+    const card = `<section class="card">${title(scope === 'seed' ? (done ? 'Semi-final seeding' : 'Semi-final seeding today') : scope === 'proj' ? `Likely seeding after round ${R.rounds}` : 'Overall standings', `${grp ? `group ${esc(grp)} · ` : ''}${asOf}`)}
       ${ctl}
       <p class="meta">${what} Tap a name to scout that player.${(() => { const k = list.filter((x) => x.pf === 'W').length, e = list.filter((x) => x.pf === 'E').length; return k + e ? ` In this list: ${k} War ${k === 1 ? 'Leader' : 'Leaders'}, ${plural(e, 'Engineer')}.` : ''; })()}</p>
       ${table}
