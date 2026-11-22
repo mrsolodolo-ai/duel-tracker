@@ -292,6 +292,65 @@ details[open] > summary { margin-bottom: 10px; }
 @media (prefers-reduced-motion: no-preference) {
   .bar i { transition: width .35s ease; }
 }
+
+/* ---------- Odds tab: design option C ("Terminal"), dark in both site themes ---------- */
+.od { --o-bg: #0a0a0b; --o-panel: #121214; --o-field: #0d0d0f; --o-ink: #ededf0; --o-muted: #8f8f9b; --o-line: #26262b; --o-acc: #5ef2c0; --o-accink: #04130e; --o-a: #5ef2c0; --o-b: #ffb454;
+  --o-body: 'Space Grotesk', system-ui, -apple-system, 'Segoe UI', sans-serif; --o-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  max-width: 430px; margin: 0 auto; padding: 0 14px 28px; background: var(--o-bg); color: var(--o-ink); font-family: var(--o-body); font-size: 15px; line-height: 1.4;
+  border-radius: 16px; color-scheme: dark; display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
+.od :focus-visible { outline-color: var(--o-acc); }
+.od-top { display: flex; align-items: center; gap: 6px; padding-top: 14px; }
+.od-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--o-acc); animation: od-pulse 1.8s ease-in-out infinite; }
+.od-lbl { margin: 0; font-family: var(--o-mono); font-weight: 600; font-size: 11.5px; line-height: 1.4; letter-spacing: .1em; text-transform: uppercase; color: var(--o-muted); }
+.od-muted { color: var(--o-muted); }
+.od-card { background: var(--o-panel); border: 1px solid var(--o-line); border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.od-in .od-card { animation: od-up .55s cubic-bezier(.2,.8,.2,1) both; }
+.od-in .od-card:nth-of-type(2) { animation-delay: 70ms; } .od-in .od-card:nth-of-type(3) { animation-delay: 140ms; } .od-in .od-card:nth-of-type(4) { animation-delay: 210ms; } .od-in .od-card:nth-of-type(5) { animation-delay: 280ms; }
+.od-pick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.od-pick > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.od-pick label { display: flex; align-items: center; gap: 6px; }
+.od-sq { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 10px; }
+.od select { appearance: auto; font-family: var(--o-body); font-size: 16px; font-weight: 600; color: var(--o-ink); background: var(--o-field); border: 1px solid var(--o-line); border-radius: 10px; padding: 10px; width: 100%; min-width: 0; min-height: 46px; }
+.od-dial { align-items: center; }
+.od-dial svg { max-width: 100%; height: auto; }
+.od-pcts { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; width: 100%; }
+.od-pcts > div { min-width: 0; } .od-pcts > div:last-child { text-align: right; }
+.od-pct { font-family: var(--o-mono); font-weight: 700; font-size: 30px; line-height: 1; font-variant-numeric: tabular-nums; }
+.od-ca { color: var(--o-a); } .od-cb { color: var(--o-b); }
+.od-nm { font-size: 12.5px; color: var(--o-muted); overflow-wrap: anywhere; }
+.od-stamp { text-align: center; border-top: 1px solid var(--o-line); padding-top: 12px; width: 100%; }
+.od-stamp-t { font-weight: 700; font-size: 24px; letter-spacing: -.01em; }
+.od-pop { animation: od-stamp .45s cubic-bezier(.2,.8,.2,1) both; }
+.od-stamp-l { color: var(--o-muted); font-size: 14px; overflow-wrap: anywhere; }
+.od-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.od-note { font-size: 12.5px; color: var(--o-muted); white-space: nowrap; }
+.od-say { margin: 0; font-size: 18px; line-height: 1.35; font-weight: 600; min-height: 74px; overflow-wrap: anywhere; }
+.od-cur { display: inline-block; width: 9px; height: 18px; margin-left: 2px; vertical-align: -3px; background: var(--o-acc); animation: od-pulse 1s steps(2) infinite; }
+.od-btn { border: 1px solid var(--o-acc); background: var(--o-acc); color: var(--o-accink); border-radius: 10px; padding: 8px 12px; min-height: 44px; font-family: var(--o-body); font-weight: 600; font-size: 14px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; transition: transform .12s ease; }
+.od-btn:active { transform: scale(.97); }
+.od-files { border-top: 1px solid var(--o-line); padding-top: 10px; display: flex; flex-direction: column; gap: 8px; font-size: 13.5px; overflow-wrap: anywhere; }
+.od-files b { font-weight: 700; }
+.od-row { display: flex; flex-direction: column; gap: 4px; }
+.od-row-h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.od-num { font-family: var(--o-mono); font-size: 15px; font-variant-numeric: tabular-nums; }
+.od-bar { display: flex; gap: 3px; height: 6px; }
+.od-bar i { display: block; background: var(--o-a); border-radius: 3px 0 0 3px; }
+.od-bar b { display: block; flex: 1 1 0; background: var(--o-b); border-radius: 0 3px 3px 0; }
+.od-ord { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; font-size: 13px; border-top: 1px solid var(--o-line); padding-top: 10px; }
+.od-ord > div:last-child { text-align: right; }
+.od-met { text-align: center; font-weight: 600; font-size: 13.5px; border-top: 1px solid var(--o-line); padding-top: 10px; overflow-wrap: anywhere; }
+.od-pips { display: flex; gap: 4px; }
+.od-pips span { flex: 1 1 0; height: 8px; border-radius: 2px; background: var(--o-line); }
+.od-pips span.on { background: var(--o-acc); }
+.od-sure { margin: 0; font-size: 14px; }
+.od-x { margin: 0; font-size: 13px; color: var(--o-muted); }
+.od-foot { margin: 0; font-size: 12.5px; color: var(--o-muted); }
+@keyframes od-up { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes od-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+@keyframes od-stamp { from { opacity: 0; transform: scale(1.5); } to { opacity: 1; transform: none; } }
+@media (max-width: 462px) { .od { max-width: none; margin: 0 -16px; border-radius: 0; } }
+@media (prefers-reduced-motion: reduce) { .od, .od * { animation: none !important; transition: none !important; } }
 </style>
 </head>
 <body>
@@ -305,6 +364,7 @@ details[open] > summary { margin-bottom: 10px; }
   </header>
   <nav class="tabs" aria-label="Sections">
     <a href="#next" data-view="next">Next fight</a>
+    <a href="#odds" data-view="odds">Odds</a>
     <a href="#race" data-view="race">Top 8</a>
     <a href="#standings" data-view="standings">Standings</a>
     <a href="#insights" data-view="insights">Insights</a>
@@ -1540,7 +1600,7 @@ details[open] > summary { margin-bottom: 10px; }
 (() => {
   'use strict';
   const E = window.DuelEngine;
-  const VIEWS = ['next', 'race', 'standings', 'insights', 'opponents', 'log', 'patterns'];
+  const VIEWS = ['next', 'odds', 'race', 'standings', 'insights', 'opponents', 'log', 'patterns'];
   const DEF_SHARED = { me: 'Sammyboy99', bonus: 0.04, sigma: 0.03, attr: 1.5, sims: 1500, bonus2: 0.0315, sigma2: 0.017 }; // bonus2 / sigma2 belong to the strength model; the older bonus / sigma are no longer read
   const DEF_PERSONAL = { me: '', myForm: null };
   const LS_ME = 'lw-duel-tracker-me-v1';
@@ -2086,9 +2146,9 @@ details[open] > summary { margin-bottom: 10px; }
     S.lastDemo = demoNow;
     drawChrome();
     let html;
-    try { html = S.bundleState === 'loading' && !S.battles.length ? '<div class="empty">Loading fights…</div>' : VIEW[S.view](); }
+    try { html = S.bundleState === 'loading' && !S.battles.length && S.view !== 'odds' ? '<div class="empty">Loading fights…</div>' : VIEW[S.view](); }
     catch (e) { console.error(e); html = `<div class="empty">This view hit a problem: ${esc(e.message)}</div>`; }
-    document.getElementById('view').innerHTML = html;
+    if (html !== OD_KEEP) document.getElementById('view').innerHTML = html;
     if (fid) {
       const el = document.getElementById(fid);
       if (el && document.activeElement !== el) {
@@ -3028,7 +3088,305 @@ details[open] > summary { margin-bottom: 10px; }
     return `<div class="stack" style="gap:16px">${head}${card}</div>`;
   }
 
-  const VIEW = { next: viewNext, race: viewRace, standings: viewStandings, insights: viewInsights, opponents: viewOpponents, log: viewLog, patterns: viewPatterns };
+  /* ---------- Odds tab: chance to win a best-of-3 match between any two players (design option C, "Terminal") ----------
+     Numbers: data/odds.json. A single fight is logistic(k * (ln of the build-reading ratio + rating difference)); the
+     table M turns that into the chance to win a best of 3. The Bookie works for the home alliance (HOME_TAG): its
+     players are never the butt of a line, everyone else is. The numbers are the same for everybody. */
+  const OD = { st: '', d: null, a: 0, b: 1, joke: 0, shown: 0.5, bw: [50, 50, 50, 50], anim: null, raf: 0, fresh: true, enter: false, pop: false, set: false, opts: '' };
+  // viewOdds() answers this when the panel on screen already shows the chosen match: draw() then leaves it alone, so a
+  // redraw asked for by another part of the page (the fight log arriving, say) does not cut its animations short.
+  const OD_KEEP = '\u0000keep-odds';
+  function loadOdds() {
+    if (OD.st) return;
+    OD.st = 'loading';
+    if (!document.getElementById('od-fonts')) {
+      const l = document.createElement('link');
+      l.id = 'od-fonts'; l.rel = 'stylesheet'; l.href = 'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap';
+      document.head.appendChild(l);
+    }
+    fetch('data/odds.json', { cache: 'no-cache' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && d.P && d.M && d.M.length === 201) { odPrep(d); OD.st = 'ok'; } else OD.st = 'none'; render(); })
+      .catch(() => { OD.st = 'none'; render(); });
+  }
+  function odPrep(d) {
+    const players = d.P.map((r, i) => ({ i, name: r[0], g: r[1], place: r[2], al: r[3], pf: r[4], listed: r[5], build: r[6], th: r[7] / 1e4, sd: r[8] / 1e4, w: r[9], l: r[10], nf: r[11], ch: r[12], never: !!r[13],
+      uw: r[14], bu: r[15], ul: r[16], wl: r[17], streak: r[18], ord: r[19], share: r[20], sf: r[21] || '', sfi: r[22] || 0, star: !!r[23] }));
+    const byName = {}, met = {};
+    players.forEach((x) => { byName[x.name] = x.i; });
+    d.H.forEach((x) => { met[x[0] + '-' + x[1]] = [x[2], x[3]]; });
+    OD.d = { players, byName, met, M: d.M, J: d.J || {}, T: d.T || null, k: d.k || 60, asOf: d.asOf || '' };
+  }
+  const odHome = (x) => x.al === HOME_TAG;
+  // Chance that A wins the best-of-3 match against B.
+  function odChance(A, B) {
+    if (A.i === B.i) return 0.5;
+    const one = 1 / (1 + Math.exp(-OD.d.k * (Math.log(A.build / B.build) + A.th - B.th)));
+    const x = Math.min(200, Math.max(0, one * 200)), i = Math.min(199, Math.floor(x)), M = OD.d.M;
+    return M[i] + (M[i + 1] - M[i]) * (x - i);
+  }
+  function odPct(q) {
+    const r = Math.round(q * 100);
+    if (r >= 100) return q > 0.9995 ? '100%' : '99%+';
+    if (r <= 0) return q < 0.0005 ? '0%' : '<1%';
+    return r + '%';
+  }
+  const odTier = (pf) => (pf >= 0.97 ? 'lock' : pf >= 0.85 ? 'heavy' : pf >= 0.7 ? 'clear' : pf >= 0.58 ? 'lean' : 'flip');
+  function odMet(A, B) {
+    const x = A.i < B.i ? OD.d.met[A.i + '-' + B.i] : OD.d.met[B.i + '-' + A.i];
+    if (!x) return null;
+    return A.i < B.i ? [x[0], x[1]] : [x[1], x[0]];
+  }
+  // The Bookie's lines for a match. hit = the players a line is at the expense of; a line that hits a home player is dropped.
+  function odLines(A, B, q) {
+    if (A.i === B.i) return [{ t: A.name + ' against ' + A.name + '. A draw, and a long look in the mirror.', hit: [] }];
+    const F = q >= 0.5 ? A : B, D = q >= 0.5 ? B : A, pf = Math.max(q, 1 - q), t = odTier(pf);
+    const k = Math.max(2, Math.round(1 / Math.max(1 - pf, 0.001)));
+    const hF = odHome(F), hD = odHome(D), L = [];
+    const say = (text, hit) => { L.push({ t: text, hit: hit || [] }); };
+    const upset = F.listed < D.listed * 0.997 && pf >= 0.58;
+    if (A.sd >= 0.019 && B.sd >= 0.019 && t !== 'lock') {
+      say('Neither of these two had a close fight in the whole qualifier. The Bookie is reading gear and tea leaves.');
+      say('Two heavyweights who have only hit sandbags. This number is a guess in a nice suit.');
+    }
+    if (upset) {
+      say('Power says ' + D.name + '. The fights say ' + F.name + '. The Bookie has watched the fights.', [D]);
+      say('The game will price this one on power. The game has not been paying attention.');
+      say(D.name + ' has the bigger number. ' + F.name + ' had the better qualifier.', [D]);
+      if (hD) say('Power says ' + D.name + ' and the Bookie’s numbers say ' + F.name + '. The Bookie hopes the numbers are wrong.');
+    }
+    if (t === 'lock') {
+      say(D.name + ' should send the squads in with a note of apology.', [D]);
+      say(F.name + ' could play this one with the screen off.', [D]);
+      say('The only upset here is ' + D.name + '’s stomach.', [D]);
+      say(F.name + ' wins this one. Beating ' + D.name + ' is nothing to frame.', [F, D]);
+      if (hD && !hF) {
+        say(F.name + ' wins this on power alone. No skill was harmed in the making of this result.', [F]);
+        say(D.name + ' ran into a wall. The wall gets no points for style.', [F]);
+      }
+      if (hD && hF) say('Not a fight. A formality between friends.');
+      say('The Bookie checked twice. Then stopped checking.');
+    } else if (t === 'heavy') {
+      say(D.name + ' wins this one time in ' + k + '. This is probably not that time.', [D]);
+      say('Somebody has to be the underdog. ' + D.name + ' drew the short straw.', [D]);
+      say('Upsets happen. So do eclipses.', [D]);
+      say(F.name + ' should take this. Should.', [F]);
+      if (hD) {
+        say(F.name + ' is the favourite. ' + D.name + ' has nothing to lose, which is the dangerous kind.');
+        say(D.name + ' wins this about once in ' + k + '. The Bookie would enjoy that once.');
+      }
+      if (hF) say(F.name + ' should take this, and the Bookie will not pretend to be neutral about it.');
+    } else if (t === 'clear') {
+      say(F.name + ' wins this unless ' + F.name + ' gets clever. Do not get clever.', [F]);
+      say('A coin on ' + D.name + ' is brave. The Bookie salutes brave. From a distance.', [D]);
+      if (hF) say(F.name + ' by a clear margin. Clear is not the same as safe.');
+      if (hD) say('The numbers lean to ' + F.name + '. The Bookie’s heart is with ' + D.name + '.');
+      say('The smart coin goes on ' + F.name + '. The fun coin has other ideas.');
+    } else if (t === 'lean') {
+      say(F.name + ' should edge it. The Bookie will be watching a ' + HOME_TAG + ' match instead.', [F, D]);
+      if (hF !== hD) say('Close on the numbers. The Bookie knows who he wants to win, and it is not ' + (hF ? D : F).name + '.', [hF ? D : F]);
+      say(F.name + ', by a nose. The squad order decides it.');
+      say(F.name + ' should win. ' + D.name + ' disagrees, loudly, and has a point.');
+      say('A lean, not a lock. The Bookie is leaning, not jumping.');
+      say('A lean. The Bookie would not bet his own coins on it, only yours.');
+    } else {
+      say('Even odds, and the Bookie cannot bring himself to care who wins.', [F, D]);
+      if (hF !== hD) say('Close on the numbers. The Bookie knows who he wants to win, and it is not ' + (hF ? D : F).name + '.', [hF ? D : F]);
+      say('Flip a coin. Then ignore the coin and watch the squad order.');
+      say('Too close to call. The Bookie is calling it anyway and will deny everything.');
+      say('Even the Bookie shrugged. That costs extra.');
+      say('Whoever reads the other one’s order wins. A guessing game with tanks.');
+    }
+    const m = odMet(A, B);
+    if (m) {
+      const n = m[0] + m[1];
+      if (m[0] === m[1]) say('They met ' + (n === 2 ? 'twice' : n + ' times') + ' in the qualifier and split them. Somebody learned something. We will see who.');
+      else { const lead = m[0] > m[1] ? A : B; say('They met ' + (n === 1 ? 'once' : n === 2 ? 'twice' : n + ' times') + ' in the qualifier. ' + lead.name + ' leads ' + Math.max(m[0], m[1]) + ' to ' + Math.min(m[0], m[1]) + '. Grudges are good for business.'); }
+    }
+    if (A.al && A.al === B.al) say('Alliance mates. Somebody is buying the drinks after this.');
+    if (odHome(A) !== odHome(B)) say('Full disclosure: the Bookie works for ' + HOME_TAG + '. The numbers do not.');
+    return L.filter((x) => !x.hit.some(odHome));
+  }
+  const odFlip = (A, B) => (A.never && B.never) || (A.ch >= 13 && B.ch >= 13) || (A.l === 0 && B.l === 0);
+  // A player's file: up to two sentences from their own record. Home players get the kind voice, everyone else the roast.
+  // A line the site owner wrote for a player (odds.json "J") comes first; "Another one" cycles them.
+  function odFile(x, flip) {
+    const own = OD.d.J[x.name];
+    if (own && own.length) return { t: own[OD.joke % own.length], mode: 'own' };
+    if (x.name === 'Sammyboy99') return { t: x.w + '–' + x.l + '. The Bookie has stopped taking bets against him. Bad for business.', mode: 'kind' };
+    const kind = odHome(x), odd = !!flip, Z = [];
+    const add = (k, r) => { const v = kind ? k : r; if (v) Z.push(v); };
+    if (x.l === 0 && x.w >= 16) add(odd ? x.w + '–0. Still waiting for a first bad day.' : x.w + '–0. Has not seen the defeat screen. May not know it exists.',
+      odd ? x.w + '–0. The Bookie is unimpressed on principle.' : x.w + '–0. Nobody likes a show-off.');
+    if (x.never && x.nf >= 16) {
+      if (x.w >= 0.75 * (x.w + x.l)) add(odd ? x.nf + ' fights, one squad order, ' + x.w + ' wins. Simple plan. Annoyingly effective.' : 'Same squad order in all ' + x.nf + ' fights, and ' + x.w + ' wins. If it is not broken, do not touch the settings.',
+        odd ? 'Has not touched the squad order in ' + x.nf + ' fights and keeps winning. Infuriating.' : 'One squad order, ' + x.nf + ' fights, ' + x.w + ' wins. Either a genius or asleep at the settings screen.');
+      else add('Same squad order in all ' + x.nf + ' fights. Knows the plan and sticks to it.',
+        odd ? 'One squad order all qualifier. The opponents have it framed on the wall.' : 'Same squad order ' + x.nf + ' fights running. Opponents send thank-you notes.');
+    }
+    if (x.uw >= 2) add('Has won ' + x.uw + ' fights the power said to lose, one while giving away ' + x.bu + '%.', x.uw + ' wins they had no business winning. Luck is a skill too. Allegedly.');
+    if (x.ul >= 2) add('', 'Lost ' + x.ul + ' they were meant to win. The power is real. The results are still loading.');
+    if (x.ch >= 13) add(odd ? 'Reshuffled the squads ' + x.ch + ' times in ' + x.nf + ' fights. Good luck guessing.' : 'Changed squad order ' + x.ch + ' times in ' + x.nf + ' fights. Scouting them is a full-time job.',
+      odd ? 'Switched squad order ' + x.ch + ' times in ' + x.nf + ' fights. A moving target, mostly moving.' : 'Changed squad order ' + x.ch + ' times in ' + x.nf + ' fights. Not even they know what is coming.');
+    if (x.pf === 'E') add('An Engineer, giving the War Leaders a head start and fighting anyway.', 'An Engineer. Builds things. Occasionally wins things.');
+    if (x.listed >= 220) add('Brings ' + Math.round(x.listed) + 'M. Less a squad, more a weather system.', 'Brings ' + Math.round(x.listed) + 'M. Wins by turning up. Tactics optional.');
+    if (x.listed < 150 && x.w >= 15) add('Among the smallest squads in a top 16, with ' + x.w + ' wins. Do not be fooled by the number.', 'Among the smallest squads in a top 16, with ' + x.w + ' wins. Easy to land punches when nobody is watching you.');
+    if (x.streak >= 6 && x.l > 0) add('Won the last ' + x.streak + ' of the qualifier.', 'Won the last ' + x.streak + ' of the qualifier. It will not last. It never does.');
+    if (x.streak <= -3) add('', 'Lost the last ' + (-x.streak) + ' of the qualifier. Due, or doomed.');
+    if (!Z.length) Z.push(kind ? 'One of ours. The Bookie will not hear a word against them.' : 'Nothing to report. The Bookie went looking for something interesting in the record and came back with a nap.');
+    return { t: Z.slice(0, 2).join(' '), mode: kind ? 'kind' : 'roast' };
+  }
+  function odBars(A, B) {
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v)), fmt = (v) => v.toFixed(1) + 'M';
+    const ra = A.build * Math.exp(A.th), rb = B.build * Math.exp(B.th);
+    const bar = (label, a, b, ta, tb) => ({ label, a: ta, b: tb, w: clamp(50 + ((a - b) / ((a + b) || 1)) * 600, 12, 88), awt: a > b ? 700 : 400, bwt: b > a ? 700 : 400 });
+    return [bar('Listed power', A.listed, B.listed, fmt(A.listed), fmt(B.listed)), bar('Fights like', A.build, B.build, fmt(A.build), fmt(B.build)),
+      bar('Bookie rating', ra, rb, fmt(ra), fmt(rb)), bar('Wins', A.w, B.w, A.w + '–' + A.l, B.w + '–' + B.l)];
+  }
+  function odOrd(x) {
+    const n = { T: 'TNK', A: 'AIR', M: 'MSL', X: 'MIX' };
+    const o = String(x.ord || '').split('').map((c) => n[c] || c).join(' · ');
+    return x.share >= 100 ? o + ', always' : o + ', ' + x.share + '% of the time';
+  }
+  function odLine() {
+    const P = OD.d.players, A = P[OD.a], B = P[OD.b], L = odLines(A, B, odChance(A, B));
+    return L[OD.joke % L.length].t;
+  }
+  const odTyped = (line, k) => { if (k >= 1) return line; const cp = Array.from(line); return cp.slice(0, Math.max(1, Math.ceil(k * cp.length))).join(''); };
+  // Writes the moving parts (the two chances, the needle, the typed line, the tape bars) into the page. False when the tab is not on screen.
+  function odPaint() {
+    const pa = document.getElementById('od-pa'), pb = document.getElementById('od-pb'), nd = document.getElementById('od-needle'), ln = document.getElementById('od-line');
+    if (!pa || !pb || !nd || !ln || !OD.d) return false;
+    const v = OD.shown;
+    pa.textContent = odPct(v); pb.textContent = odPct(1 - v);
+    nd.style.transform = 'rotate(' + ((0.5 - v) * 170).toFixed(1) + 'deg)';
+    ln.textContent = odTyped(odLine(), OD.anim ? OD.anim.k : 1);
+    for (let i = 0; i < 4; i++) { const b = document.getElementById('od-bw' + i); if (b) b.style.width = OD.bw[i].toFixed(1) + '%'; }
+    return true;
+  }
+  // Runs the numbers from where they stand to the current match: 0.9 s, ease out. The line types itself over the same time.
+  function odGo(from, bwFrom) {
+    const P = OD.d.players, A = P[OD.a], B = P[OD.b], to = odChance(A, B), bwTo = odBars(A, B).map((r) => r.w);
+    let still = typeof requestAnimationFrame !== 'function' || typeof performance === 'undefined';
+    try { still = still || window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { /* no matchMedia */ }
+    if (OD.raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(OD.raf);
+    OD.raf = 0;
+    if (to !== from) OD.pop = true;
+    if (still) { OD.anim = null; OD.shown = to; OD.bw = bwTo; odPaint(); return; }
+    OD.anim = { from, to, bwFrom: (bwFrom || OD.bw).slice(), bwTo, t0: performance.now(), dur: 900, k: 0 };
+    OD.shown = from; OD.bw = OD.anim.bwFrom.slice();
+    const step = (now) => {
+      const a = OD.anim;
+      OD.raf = 0;
+      if (!a) return;
+      const k = Math.max(0, Math.min(1, (now - a.t0) / a.dur)), e = 1 - Math.pow(1 - k, 3);
+      a.k = k; OD.shown = a.from + (a.to - a.from) * e; OD.bw = a.bwFrom.map((w, i) => w + (a.bwTo[i] - w) * e);
+      const on = odPaint();
+      if (k >= 1 || (!on && S.view !== 'odds')) { OD.anim = null; OD.shown = a.to; OD.bw = a.bwTo.slice(); odPaint(); return; }
+      OD.raf = requestAnimationFrame(step);
+    };
+    OD.raf = requestAnimationFrame(step);
+  }
+  function odPick(side, i) {
+    if (!OD.d || !(i >= 0) || !OD.d.players[i]) return;
+    const from = OD.shown;
+    if (side === 'a') OD.a = i; else OD.b = i;
+    OD.joke = 0;
+    odGo(from);
+    render();
+  }
+  function odMore() {
+    if (!OD.d) return;
+    OD.joke += 1;
+    const P = OD.d.players, A = P[OD.a], B = P[OD.b], fa = document.getElementById('od-fa'), fb = document.getElementById('od-fb');
+    if (fa) fa.textContent = odFile(A, false).t;
+    if (fb) fb.textContent = odFile(B, odFlip(A, B)).t;
+    odGo(OD.shown);
+  }
+  // The pickers: the 128 still in, by semi-final group in the order the game lists them; then everyone who went out in the qualifier.
+  function odOptions(sel) {
+    if (!OD.opts) {
+      const inn = {}, out = {}, html = [];
+      OD.d.players.forEach((x) => { const o = x.sf ? inn : out, g = x.sf || x.g; (o[g] = o[g] || []).push(x); });
+      const opt = (x) => `<option value="${x.i}">${esc(x.name)}</option>`;
+      Object.keys(inn).sort().forEach((g) => { html.push(`<optgroup label="Semi-final group ${esc(g)}">${inn[g].sort((a, b) => a.sfi - b.sfi).map(opt).join('')}</optgroup>`); });
+      Object.keys(out).sort().forEach((g) => { html.push(`<optgroup label="Out in the qualifier · group ${esc(g)}">${out[g].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })).map(opt).join('')}</optgroup>`); });
+      OD.opts = html.join('');
+    }
+    return OD.opts.replace(`<option value="${sel}">`, `<option value="${sel}" selected>`);
+  }
+  // Opening match: the visitor's own semi-final group and the opponent the model has closest; without one, ROaR's closest match of the stage.
+  function odOpening() {
+    const d = OD.d, P = d.players, me = P[d.byName[settings().me]];
+    let A = me && me.sf ? me : P[d.byName['ᐧSkyeᐧ']], B = null;
+    if (A && A.sf) {
+      P.forEach((x) => { if (x.sf === A.sf && x.i !== A.i && (!B || Math.abs(odChance(A, x) - 0.5) < Math.abs(odChance(A, B) - 0.5))) B = x; });
+    }
+    if (!A || !B) { A = P[0]; B = P[1] || P[0]; }
+    OD.a = A.i; OD.b = B.i; OD.joke = 0;
+  }
+  function viewOdds() {
+    loadOdds();
+    if (OD.st !== 'ok') return `<div class="od"><div class="od-top"></div><section class="od-card"><p class="od-muted">${OD.st === 'none' ? 'The odds did not load. Reload the page to try again.' : 'Loading the odds…'}</p></section></div>`;
+    const d = OD.d, P = d.players;
+    if (!OD.set) { OD.set = true; odOpening(); }
+    const key = OD.a + '-' + OD.b, cur = document.getElementById('od');
+    if (!OD.fresh && cur && cur.dataset.k === key) return OD_KEEP;
+    if (OD.fresh) { OD.fresh = false; OD.enter = true; odGo(0.5, [50, 50, 50, 50]); }
+    const A = P[OD.a], B = P[OD.b], same = A.i === B.i, q = odChance(A, B);
+    const pf = Math.max(q, 1 - q), F = q >= 0.5 ? A : B, D = q >= 0.5 ? B : A, t = odTier(pf);
+    const upset = !same && F.listed < D.listed * 0.997 && pf >= 0.58;
+    const stampNames = { lock: 'Lock', heavy: 'Heavy favourite', clear: 'Clear edge', lean: 'Lean', flip: 'Coin flip' };
+    const stampLines = { lock: F.name + ' wins this one.' + (odHome(D) ? '' : ' Next.'), heavy: F.name + ', comfortably.', clear: F.name + ' has the edge.', lean: F.name + ', by a nose.', flip: 'Too close to call.' };
+    const stamp = same ? 'No contest' : upset ? 'Upset alert' : stampNames[t];
+    const stampLine = same ? 'Pick two different players. The Bookie insists.' : upset && !odHome(D) ? 'Power says ' + D.name + '. The fights say ' + F.name + '.' : stampLines[t];
+    const v = OD.shown, bars = odBars(A, B), m = same ? null : odMet(A, B);
+    const metLine = !m ? '' : m[0] === m[1] ? 'Head to head in the qualifier: ' + m[0] + ' each' : 'Head to head in the qualifier: ' + (m[0] > m[1] ? A.name : B.name) + ' leads ' + Math.max(m[0], m[1]) + ' to ' + Math.min(m[0], m[1]);
+    const sure = t === 'lock' && !same, lo = sure || (A.sd <= 0.015 && B.sd <= 0.015), hi = !sure && A.sd >= 0.019 && B.sd >= 0.019, pips = lo ? 3 : hi ? 1 : 2;
+    const sureTitle = sure ? 'No doubt.' : lo ? 'Battle-tested.' : hi ? 'On builds alone.' : 'Half tested.';
+    const sureLine = sure ? 'The gap is too big for anything else to matter.' : lo ? 'Both went through plenty of close fights in the qualifier.' : hi ? 'Neither was pushed in the qualifier. This price comes from gear, weapons and chips.' : 'One of them barely had a close fight in the qualifier. Treat the number as a lean.';
+    const moves = (x) => (x.never ? 'never changed' : 'changed ' + x.ch + (x.ch === 1 ? ' time' : ' times'));
+    const enter = OD.enter, pop = OD.pop;
+    OD.enter = false; OD.pop = false;
+    const T = d.T;
+    return `<div class="od${enter ? ' od-in' : ''}" id="od" data-k="${key}">
+      <div class="od-top"><span class="od-dot" aria-hidden="true"></span><span class="od-lbl">Model · ${esc(d.asOf)}</span></div>
+      <section class="od-card"><div class="od-pick">
+        <div><label for="od-a" class="od-lbl"><span class="od-sq" style="background:var(--o-a)" aria-hidden="true"></span>Player one</label><select id="od-a">${odOptions(A.i)}</select></div>
+        <div><label for="od-b" class="od-lbl"><span class="od-sq" style="background:var(--o-b)" aria-hidden="true"></span>Player two</label><select id="od-b">${odOptions(B.i)}</select></div>
+      </div></section>
+      <section class="od-card od-dial">
+        <div class="od-lbl">Chance to win the match · best of 3</div>
+        <svg aria-hidden="true" width="280" height="156" viewBox="0 0 280 156">
+          <path d="M 30 140 A 110 110 0 0 1 140 30" style="fill:none;stroke:var(--o-a);stroke-width:14"></path><path d="M 140 30 A 110 110 0 0 1 250 140" style="fill:none;stroke:var(--o-b);stroke-width:14"></path>
+          <path d="M 140 18 L 140 42" style="fill:none;stroke:var(--o-panel);stroke-width:4"></path>
+          <g id="od-needle" style="transform-origin:140px 140px;transform:rotate(${((0.5 - v) * 170).toFixed(1)}deg)"><path d="M140 140 L140 50" style="fill:none;stroke:var(--o-ink);stroke-width:4;stroke-linecap:round"></path></g><circle cx="140" cy="140" r="9" style="fill:var(--o-ink)"></circle></svg>
+        <div class="od-pcts"><div><div class="od-pct od-ca" id="od-pa">${esc(odPct(v))}</div><div class="od-nm">${esc(A.name)}</div></div>
+          <div><div class="od-pct od-cb" id="od-pb">${esc(odPct(1 - v))}</div><div class="od-nm">${esc(B.name)}</div></div></div>
+        <div class="od-stamp" role="img" aria-label="${esc(A.name + ' ' + odPct(q) + ', ' + B.name + ' ' + odPct(1 - q) + ' to win the match')}"><div class="od-stamp-t${pop ? ' od-pop' : ''}">${esc(stamp)}</div><div class="od-stamp-l">${esc(stampLine)}</div></div>
+      </section>
+      <section class="od-card">
+        <div class="od-h"><h2 class="od-lbl">The Bookie says</h2><span class="od-note">On ${esc(HOME_TAG)}’s payroll</span></div>
+        <p class="od-say"><span id="od-line">${esc(odTyped(odLine(), OD.anim ? OD.anim.k : 1))}</span><span class="od-cur" aria-hidden="true"></span></p>
+        <div><button type="button" class="od-btn" data-act="od-more">Another one</button></div>
+        <div class="od-files"><div><b class="od-ca">${esc(A.name)}</b> <span class="od-muted" id="od-fa">${esc(odFile(A, false).t)}</span></div><div><b class="od-cb">${esc(B.name)}</b> <span class="od-muted" id="od-fb">${esc(odFile(B, odFlip(A, B)).t)}</span></div></div>
+      </section>
+      <section class="od-card"><h2 class="od-lbl">Tale of the tape</h2>
+        ${bars.map((r, i) => `<div class="od-row"><div class="od-row-h"><span class="od-num" style="font-weight:${r.awt}">${esc(r.a)}</span><span class="od-lbl">${r.label}</span><span class="od-num" style="font-weight:${r.bwt}">${esc(r.b)}</span></div><div class="od-bar" aria-hidden="true"><i id="od-bw${i}" style="width:${OD.bw[i].toFixed(1)}%"></i><b></b></div></div>`).join('')}
+        <div class="od-ord"><div><div class="od-lbl">Squad order</div>${moves(A)}<br>${esc(odOrd(A))}</div><div><div class="od-lbl">Squad order</div>${moves(B)}<br>${esc(odOrd(B))}</div></div>
+        ${m ? `<div class="od-met">${esc(metLine)}</div>` : ''}
+      </section>
+      <section class="od-card"><h2 class="od-lbl">How sure is the Bookie?</h2>
+        <div class="od-pips" role="img" aria-label="${esc(sureTitle)}"><span class="on"></span><span${pips >= 2 ? ' class="on"' : ''}></span><span${pips >= 3 ? ' class="on"' : ''}></span></div>
+        <p class="od-sure"><b>${esc(sureTitle)}</b> ${esc(sureLine)}</p>
+        ${!same && A.g !== B.g ? '<p class="od-x">Different qualifier groups: no fights between them on record, so this price leans on builds.</p>' : ''}
+      </section>
+      ${T ? `<p class="od-foot">Tested on ${Number(T.n).toLocaleString('en-US')} fights it had not seen. When listed power was within 2%, the stronger player on paper won ${T.paper}% of the time and the Bookie’s pick won ${T.pick}%. In-game coins only.</p>` : ''}
+    </div>`;
+  }
+  // For the page tests (scripts/odds_check.py): the same functions the tab uses.
+  window.DuelOdds = { state: () => OD, chance: odChance, lines: odLines, file: odFile, flip: odFlip, home: odHome, pct: odPct };
+  const VIEW = { next: viewNext, odds: viewOdds, race: viewRace, standings: viewStandings, insights: viewInsights, opponents: viewOpponents, log: viewLog, patterns: viewPatterns };
 
   /* ---------- actions ---------- */
   async function saveForm() {
@@ -3100,6 +3458,7 @@ details[open] > summary { margin-bottom: 10px; }
     const el = ev.target.closest('[data-act]');
     if (!el) return;
     const a = el.dataset.act;
+    if (a === 'od-more') { odMore(); return; }
     if (a === 'real') { S.forceReal = true; location.hash = '#next'; render(); }
     else if (a === 'dismiss') { S.note = ''; S.noteErr = false; render(); }
     else if (a === 'opp') { setOpp(el.dataset.name); S.oppOpen = false; render(); }
@@ -3160,6 +3519,7 @@ details[open] > summary { margin-bottom: 10px; }
   });
   document.addEventListener('change', (ev) => {
     const t = ev.target;
+    if (t.id === 'od-a' || t.id === 'od-b') { odPick(t.id === 'od-a' ? 'a' : 'b', +t.value); return; }
     if (t.id === 'ins-pick') { S.insFor = t.value; render(); return; }
     if (t.id === 'st-group') { S.stGroup = t.value; render(); return; }
     if (t.id === 'me-pick' || t.id === 'set-me') {
@@ -3226,7 +3586,7 @@ details[open] > summary { margin-bottom: 10px; }
     if (b && typeof window.lwduelLogout === 'function') { b.hidden = false; b.addEventListener('click', () => window.lwduelLogout()); }
   })();
   function fromHash() { const h = (location.hash || '').slice(1); S.view = VIEWS.indexOf(h) >= 0 ? h : 'next'; }
-  window.addEventListener('hashchange', () => { fromHash(); render(); });
+  window.addEventListener('hashchange', () => { fromHash(); if (S.view === 'odds') OD.fresh = true; render(); });
   const HOT_KEYS = ['view', 'opp', 'oppForm', 'oppEdited', 'oppResult', 'oppManual', 'oppOpen', 'shownPerm', 'sel', 'forceReal'];
   function snapshotState() { const o = {}; HOT_KEYS.forEach((k) => { o[k] = S[k]; }); return JSON.parse(JSON.stringify(o)); }
   function start(hot) {
