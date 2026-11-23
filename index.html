@@ -345,6 +345,14 @@ details[open] > summary { margin-bottom: 10px; }
 .od-ord { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; font-size: 13px; border-top: 1px solid var(--o-line); padding-top: 10px; }
 .od-ord > div:last-child { text-align: right; }
 .od-met { text-align: center; font-weight: 600; font-size: 13.5px; border-top: 1px solid var(--o-line); padding-top: 10px; overflow-wrap: anywhere; }
+.od-ctr { text-align: center; font-size: 13.5px; color: var(--o-muted); overflow-wrap: anywhere; }
+.od-grp { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--o-line); padding-top: 12px; min-width: 0; }
+.od-grp .od-lbl { overflow-wrap: anywhere; }
+.od-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.od-chip { border: 1px solid var(--o-line); background: var(--o-field); color: var(--o-ink); border-radius: 999px; padding: 8px 12px; min-height: 40px; max-width: 100%; font-family: var(--o-body); font-size: 13.5px; font-weight: 600;
+  line-height: 1.2; cursor: pointer; overflow-wrap: anywhere; text-align: left; }
+.od-chip.on { border-color: var(--o-b); color: var(--o-b); }
+.od-chip:active { transform: scale(.97); }
 .od-pips { display: flex; gap: 4px; }
 .od-pips span { flex: 1 1 0; height: 8px; border-radius: 2px; background: var(--o-line); }
 .od-pips span.on { background: var(--o-acc); }
@@ -3178,19 +3186,75 @@ details[open] > summary { margin-bottom: 10px; }
   }
   function odPrep(d) {
     const players = d.P.map((r, i) => ({ i, name: r[0], g: r[1], place: r[2], al: r[3], pf: r[4], listed: r[5], build: r[6], th: r[7] / 1e4, sd: r[8] / 1e4, w: r[9], l: r[10], nf: r[11], ch: r[12], never: !!r[13],
-      uw: r[14], bu: r[15], ul: r[16], wl: r[17], streak: r[18], ord: r[19], share: r[20], sf: r[21] || '', sfi: r[22] || 0, star: !!r[23] }));
+      uw: r[14], bu: r[15], ul: r[16], wl: r[17], streak: r[18], ord: r[19], share: r[20], sf: r[21] || '', sfi: r[22] || 0, star: !!r[23], main: r[24] || '', mp: r[25] || 0, bt: r[26] || '', bp: r[27] || 0, hasMain: r.length > 24, sq: r[28] || null }));
     const byName = {}, met = {};
     players.forEach((x) => { byName[x.name] = x.i; });
     d.H.forEach((x) => { met[x[0] + '-' + x[1]] = [x[2], x[3]]; });
-    OD.d = { players, byName, met, M: d.M, J: d.J || {}, T: d.T || null, k: d.k || 60, asOf: d.asOf || '' };
+    OD.d = { players, byName, met, M: d.M, J: d.J || {}, T: d.T || null, k: d.k || 60, asOf: d.asOf || '', cg: d.cg || {}, eg: d.eg || null };
+    OD.game = {};
+    (d.G || []).forEach((g) => { OD.game[g[0] + '-' + g[1]] = g[2] / 1e5; });      // worked out beforehand for every pair inside a semi-final group
   }
   const odHome = (x) => x.al === HOME_TAG;
-  // Chance that A wins the best-of-3 match against B.
-  function odChance(A, B) {
+  // The counter between the two mains, in log build: above zero when A's main beats B's (Tank > Missile > Aircraft > Tank),
+  // below zero the other way round, zero for the same main, a balanced player or a main that is not on record.
+  function odCtr(A, B) {
+    const g = OD.d.cg || {}, a = A.main, b = B.main;
+    return E.BEATS[a] === b ? g[a + b] || 0 : E.BEATS[b] === a ? -(g[b + a] || 0) : 0;
+  }
+  // What a player mains, for the tape: the type with the highest type bonus and the listed power of that squad.
+  function odMain(x) {
+    const n = { T: 'TNK', A: 'AIR', M: 'MSL', X: 'MIX' };
+    if (x.main === 'B') return 'Balanced' + (x.bp ? ' · best ' + (n[x.bt] || 'squad') + ' ' + x.bp.toFixed(1) + 'M' : '');
+    if (!E.TYPE_NAME[x.main]) return 'Not on record';
+    return E.TYPE_NAME[x.main] + (x.mp ? ' · ' + x.mp.toFixed(1) + 'M' : '');
+  }
+  function odCtrLine(A, B) {
+    const c = odCtr(A, B), W = c > 0 ? A : B, L = c > 0 ? B : A;
+    if (c) return E.TYPE_NAME[W.main] + ' beats ' + E.TYPE_NAME[L.main] + ': ' + W.name + ' has the counter. Worth about ' + (Math.abs(c) * 100).toFixed(2).replace(/\.?0+$/, '') + '% of build, already in the price.';
+    if (!E.TYPE_NAME[A.main] && A.main !== 'B') return 'No counter in the price: ' + A.name + '’s main is not on record.';
+    if (!E.TYPE_NAME[B.main] && B.main !== 'B') return 'No counter in the price: ' + B.name + '’s main is not on record.';
+    if (A.main === 'B' || B.main === 'B') return 'No counter in the price: ' + (A.main === 'B' && B.main === 'B' ? 'both are balanced.' : (A.main === 'B' ? A.name : B.name) + ' is balanced.');
+    return 'Both main ' + E.TYPE_NAME[A.main] + ': no counter either way.';
+  }
+  // "Records": chance that A wins the best-of-3 match, from strength, results and mains in the qualifier.
+  function odRec(A, B) {
     if (A.i === B.i) return 0.5;
-    const one = 1 / (1 + Math.exp(-OD.d.k * (Math.log(A.build / B.build) + A.th - B.th)));
+    const one = 1 / (1 + Math.exp(-OD.d.k * (Math.log(A.build / B.build) + A.th - B.th + odCtr(A, B))));
     const x = Math.min(200, Math.max(0, one * 200)), i = Math.min(199, Math.floor(x)), M = OD.d.M;
     return M[i] + (M[i + 1] - M[i]) * (x - i);
+  }
+  // Seven points of a normal curve for the strength shift between the two players (Gauss-Hermite; the weights add to the root of pi).
+  const OD_GH = [[-2.651961356835233, 0.0009717812450995192], [-1.673551628767471, 0.05451558281912703], [-0.8162878828589647, 0.4256072526101278], [0, 0.8102646175568073],
+    [0.8162878828589647, 0.4256072526101278], [1.673551628767471, 0.05451558281912703], [2.651961356835233, 0.0009717812450995192]];
+  // "Re-order": the fight engine's chance that A wins the best of 3 when both players choose their squad order for this
+  // opponent. The 36 order pairs are solved as a zero-sum game; every round draws its orders again; the strength shift
+  // stays for the match. null when a line-up is not on file. Always worked out with the earlier player of the list as
+  // A, so that the two directions add to exactly 100%.
+  function odGame(A, B) {
+    if (A.i === B.i) return 0.5;
+    if (A.i > B.i) { const v = odGame(B, A); return v == null ? null : 1 - v; }
+    const key = A.i + '-' + B.i;
+    if (key in OD.game) return OD.game[key];
+    const g = OD.d.eg, sq = (x) => (x.sq ? E.normSquads(x.sq.map((q) => ({ t: q[0], p: q[1], x: q[2] }))) : null), sa = g ? sq(A) : null, sb = g ? sq(B) : null;
+    let out = null;
+    if (sa && sb) {
+      const ca = E.canonical(sa).canon, cb = E.canonical(sb).canon, I = [0, 1, 2, 3, 4, 5];
+      const opt = { bonus: E.DEFAULTS.bonus, sigma: E.DEFAULTS.sigma, attr: 1.5, n: g.n, ma: E.profMult(A.pf), mb: E.profMult(B.pf) };
+      const shift = (c, d) => c.map((q) => Object.assign({}, q, { p: q.p * Math.exp(d) }));
+      const Ws = OD_GH.map((nd) => { const d = Math.SQRT2 * g.sd * nd[0] / 2; return E.winMatrix(shift(ca, d), shift(cb, -d), opt); });
+      const ws = OD_GH.reduce((t, nd) => t + nd[1], 0);
+      const W = I.map((i) => I.map((j) => OD_GH.reduce((t, nd, k) => t + nd[1] * Ws[k][i][j], 0) / ws));
+      const x = E.solveZeroSum(W, g.it).rawRow, y = E.solveZeroSum(E.flipMatrix(W), g.it).rawRow;
+      out = OD_GH.reduce((t, nd, k) => { const q = I.reduce((u, i) => u + x[i] * I.reduce((v, j) => v + y[j] * Ws[k][i][j], 0), 0); return t + nd[1] * (3 * q * q - 2 * q * q * q); }, 0) / ws;
+    }
+    OD.game[key] = out;
+    return out;
+  }
+  // The number shown: the average of the two (on the qualifier it called more fights than either alone).
+  function odChance(A, B) {
+    if (A.i === B.i) return 0.5;
+    const rec = odRec(A, B), game = odGame(A, B), w = OD.d.eg && OD.d.eg.w != null ? OD.d.eg.w : 0.5;
+    return game == null ? rec : (1 - w) * rec + w * game;
   }
   function odPct(q) {
     const r = Math.round(q * 100);
@@ -3371,23 +3435,28 @@ details[open] > summary { margin-bottom: 10px; }
     odGo(OD.shown);
   }
   // The pickers: the 128 still in, by semi-final group in the order the game lists them; then everyone who went out in the qualifier.
-  function odOptions(sel) {
+  // "first": a semi-final group to bring to the top of the list (player one's group, in player two's list), with whose group it is.
+  function odOptions(sel, first, whose) {
     if (!OD.opts) {
-      const inn = {}, out = {}, html = [];
+      const inn = {}, out = {};
       OD.d.players.forEach((x) => { const o = x.sf ? inn : out, g = x.sf || x.g; (o[g] = o[g] || []).push(x); });
       const opt = (x) => `<option value="${x.i}">${esc(x.name)}</option>`;
-      Object.keys(inn).sort().forEach((g) => { html.push(`<optgroup label="Semi-final group ${esc(g)}">${inn[g].sort((a, b) => a.sfi - b.sfi).map(opt).join('')}</optgroup>`); });
-      Object.keys(out).sort().forEach((g) => { html.push(`<optgroup label="Out in the qualifier · group ${esc(g)}">${out[g].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })).map(opt).join('')}</optgroup>`); });
-      OD.opts = html.join('');
+      OD.opts = { inn: Object.keys(inn).sort().map((g) => [g, inn[g].sort((a, b) => a.sfi - b.sfi).map(opt).join('')]),
+        out: Object.keys(out).sort().map((g) => `<optgroup label="Out in the qualifier · group ${esc(g)}">${out[g].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })).map(opt).join('')}</optgroup>`).join('') };
     }
-    return OD.opts.replace(`<option value="${sel}">`, `<option value="${sel}" selected>`);
+    const grp = (x, top) => `<optgroup label="Semi-final group ${esc(x[0])}${top ? ' · ' + esc(whose) + '’s group' : ''}">${x[1]}</optgroup>`;
+    const inn = OD.opts.inn, top = first ? inn.filter((x) => x[0] === first) : [];
+    const html = top.map((x) => grp(x, true)).join('') + inn.filter((x) => !top.length || x[0] !== first).map((x) => grp(x, false)).join('') + OD.opts.out;
+    return html.replace(`<option value="${sel}">`, `<option value="${sel}" selected>`);
   }
+  // The players who share player one's semi-final group: the only ones he can meet in this stage.
+  function odMates(A) { return A.sf ? OD.d.players.filter((x) => x.sf === A.sf && x.i !== A.i).sort((a, b) => a.sfi - b.sfi) : []; }
   // Opening match: the visitor's own semi-final group and the opponent the model has closest; without one, ROaR's closest match of the stage.
   function odOpening() {
     const d = OD.d, P = d.players, me = P[d.byName[settings().me]];
     let A = me && me.sf ? me : P[d.byName['ᐧSkyeᐧ']], B = null;
     if (A && A.sf) {
-      P.forEach((x) => { if (x.sf === A.sf && x.i !== A.i && (!B || Math.abs(odChance(A, x) - 0.5) < Math.abs(odChance(A, B) - 0.5))) B = x; });
+      P.forEach((x) => { if (x.sf === A.sf && x.i !== A.i && (!B || Math.abs(odRec(A, x) - 0.5) < Math.abs(odRec(A, B) - 0.5))) B = x; });
     }
     if (!A || !B) { A = P[0]; B = P[1] || P[0]; }
     OD.a = A.i; OD.b = B.i; OD.joke = 0;
@@ -3400,7 +3469,7 @@ details[open] > summary { margin-bottom: 10px; }
     const key = OD.a + '-' + OD.b, cur = document.getElementById('od');
     if (!OD.fresh && cur && cur.dataset.k === key) return OD_KEEP;
     if (OD.fresh) { OD.fresh = false; OD.enter = true; odGo(0.5, [50, 50, 50, 50]); }
-    const A = P[OD.a], B = P[OD.b], same = A.i === B.i, q = odChance(A, B);
+    const A = P[OD.a], B = P[OD.b], same = A.i === B.i, q = odChance(A, B), mates = odMates(A);
     const pf = Math.max(q, 1 - q), F = q >= 0.5 ? A : B, D = q >= 0.5 ? B : A, t = odTier(pf);
     const upset = !same && F.listed < D.listed * 0.997 && pf >= 0.58;
     const stampNames = { lock: 'Lock', heavy: 'Heavy favourite', clear: 'Clear edge', lean: 'Lean', flip: 'Coin flip' };
@@ -3409,9 +3478,13 @@ details[open] > summary { margin-bottom: 10px; }
     const stampLine = same ? 'Pick two different players. The Bookie insists.' : upset && !odHome(D) ? 'Power says ' + D.name + '. The fights say ' + F.name + '.' : stampLines[t];
     const v = OD.shown, bars = odBars(A, B), m = same ? null : odMet(A, B);
     const metLine = !m ? '' : m[0] === m[1] ? 'Head to head in the qualifier: ' + m[0] + ' each' : 'Head to head in the qualifier: ' + (m[0] > m[1] ? A.name : B.name) + ' leads ' + Math.max(m[0], m[1]) + ' to ' + Math.min(m[0], m[1]);
-    const sure = t === 'lock' && !same, lo = sure || (A.sd <= 0.015 && B.sd <= 0.015), hi = !sure && A.sd >= 0.019 && B.sd >= 0.019, pips = lo ? 3 : hi ? 1 : 2;
-    const sureTitle = sure ? 'No doubt.' : lo ? 'Battle-tested.' : hi ? 'On builds alone.' : 'Half tested.';
-    const sureLine = sure ? 'The gap is too big for anything else to matter.' : lo ? 'Both went through plenty of close fights in the qualifier.' : hi ? 'Neither was pushed in the qualifier. This price comes from gear, weapons and chips.' : 'One of them barely had a close fight in the qualifier. Treat the number as a lean.';
+    const rec = odRec(A, B), game = same ? null : odGame(A, B), recF = q >= 0.5 ? rec : 1 - rec, gameF = game == null ? null : q >= 0.5 ? game : 1 - game;
+    const split = game != null && (rec >= 0.5) !== (game >= 0.5) && Math.abs(rec - game) >= 0.1;
+    const sure = t === 'lock' && !same, lo = !split && (sure || (A.sd <= 0.015 && B.sd <= 0.015)), hi = split || (!sure && A.sd >= 0.019 && B.sd >= 0.019), pips = lo ? 3 : hi ? 1 : 2;
+    const sureTitle = split ? 'Split decision.' : sure ? 'No doubt.' : lo ? 'Battle-tested.' : hi ? 'On builds alone.' : 'Half tested.';
+    const sureLine = split ? 'The records point to ' + (rec >= 0.5 ? A : B).name + '. Once both re-order their squads, the fight engine points to ' + (game >= 0.5 ? A : B).name + '. Treat this one as open.'
+      : sure ? 'The gap is too big for anything else to matter.' : lo ? 'Both went through plenty of close fights in the qualifier.' : hi ? 'Neither was pushed in the qualifier. This price comes from gear, weapons and chips.' : 'One of them barely had a close fight in the qualifier. Treat the number as a lean.';
+    const twoLine = game == null ? '' : 'Two prices for ' + F.name + ', averaged above: ' + odPct(recF) + ' on the records, ' + odPct(gameF) + ' if both re-order their squads for this match.';
     const moves = (x) => (x.never ? 'never changed' : 'changed ' + x.ch + (x.ch === 1 ? ' time' : ' times'));
     const enter = OD.enter, pop = OD.pop;
     OD.enter = false; OD.pop = false;
@@ -3420,8 +3493,8 @@ details[open] > summary { margin-bottom: 10px; }
       <div class="od-top"><span class="od-dot" aria-hidden="true"></span><span class="od-lbl">Model · ${esc(d.asOf)}</span></div>
       <section class="od-card"><div class="od-pick">
         <div><label for="od-a" class="od-lbl"><span class="od-sq" style="background:var(--o-a)" aria-hidden="true"></span>Player one</label><select id="od-a">${odOptions(A.i)}</select></div>
-        <div><label for="od-b" class="od-lbl"><span class="od-sq" style="background:var(--o-b)" aria-hidden="true"></span>Player two</label><select id="od-b">${odOptions(B.i)}</select></div>
-      </div></section>
+        <div><label for="od-b" class="od-lbl"><span class="od-sq" style="background:var(--o-b)" aria-hidden="true"></span>Player two</label><select id="od-b">${odOptions(B.i, A.sf, A.name)}</select></div>
+      </div>${mates.length ? `<div class="od-grp"><div class="od-lbl">Group ${esc(A.sf)} · can face ${esc(A.name)}</div><div class="od-chips" role="group" aria-label="Players in ${esc(A.name)}’s semi-final group">${mates.map((x) => `<button type="button" class="od-chip${x.i === B.i ? ' on' : ''}" data-act="od-b" data-i="${x.i}"${x.i === B.i ? ' aria-pressed="true"' : ''}>${esc(x.name)}</button>`).join('')}</div></div>` : ''}</section>
       <section class="od-card od-dial">
         <div class="od-lbl">Chance to win the match · best of 3</div>
         <svg aria-hidden="true" width="280" height="156" viewBox="0 0 280 156">
@@ -3441,18 +3514,20 @@ details[open] > summary { margin-bottom: 10px; }
       <section class="od-card"><h2 class="od-lbl">Tale of the tape</h2>
         ${bars.map((r, i) => `<div class="od-row"><div class="od-row-h"><span class="od-num" style="font-weight:${r.awt}">${esc(r.a)}</span><span class="od-lbl">${r.label}</span><span class="od-num" style="font-weight:${r.bwt}">${esc(r.b)}</span></div><div class="od-bar" aria-hidden="true"><i id="od-bw${i}" style="width:${OD.bw[i].toFixed(1)}%"></i><b></b></div></div>`).join('')}
         <div class="od-ord"><div><div class="od-lbl">Squad order</div>${moves(A)}<br>${esc(odOrd(A))}</div><div><div class="od-lbl">Squad order</div>${moves(B)}<br>${esc(odOrd(B))}</div></div>
+        ${A.hasMain ? `<div class="od-ord" id="od-mains"><div><div class="od-lbl">Main</div>${esc(odMain(A))}</div><div><div class="od-lbl">Main</div>${esc(odMain(B))}</div></div>${same ? '' : `<div class="od-ctr" id="od-ctr">${esc(odCtrLine(A, B))}</div>`}` : ''}
         ${m ? `<div class="od-met">${esc(metLine)}</div>` : ''}
       </section>
       <section class="od-card"><h2 class="od-lbl">How sure is the Bookie?</h2>
         <div class="od-pips" role="img" aria-label="${esc(sureTitle)}"><span class="on"></span><span${pips >= 2 ? ' class="on"' : ''}></span><span${pips >= 3 ? ' class="on"' : ''}></span></div>
         <p class="od-sure"><b>${esc(sureTitle)}</b> ${esc(sureLine)}</p>
+        ${twoLine ? `<p class="od-x" id="od-two">${esc(twoLine)}</p>` : ''}
         ${!same && A.g !== B.g ? '<p class="od-x">Different qualifier groups: no fights between them on record, so this price leans on builds.</p>' : ''}
       </section>
       ${T ? `<p class="od-foot">Tested on ${Number(T.n).toLocaleString('en-US')} fights it had not seen. When listed power was within 2%, the stronger player on paper won ${T.paper}% of the time and the Bookie’s pick won ${T.pick}%. In-game coins only.</p>` : ''}
     </div>`;
   }
   // For the page tests (scripts/odds_check.py): the same functions the tab uses.
-  window.DuelOdds = { state: () => OD, chance: odChance, lines: odLines, file: odFile, flip: odFlip, home: odHome, pct: odPct };
+  window.DuelOdds = { state: () => OD, chance: odChance, lines: odLines, file: odFile, flip: odFlip, home: odHome, pct: odPct, ctr: odCtr, main: odMain, ctrLine: odCtrLine, mates: odMates, rec: odRec, game: odGame };
   const VIEW = { next: viewNext, odds: viewOdds, race: viewRace, standings: viewStandings, insights: viewInsights, opponents: viewOpponents, log: viewLog, patterns: viewPatterns };
 
   /* ---------- actions ---------- */
@@ -3526,6 +3601,7 @@ details[open] > summary { margin-bottom: 10px; }
     if (!el) return;
     const a = el.dataset.act;
     if (a === 'od-more') { odMore(); return; }
+    if (a === 'od-b') { odPick('b', +el.dataset.i); return; }
     if (a === 'find-me' || a === 'find-opp') { findPick(a === 'find-me' ? 'me' : 'opp', el.dataset.name); return; }
     if (a === 'real') { S.forceReal = true; location.hash = '#next'; render(); }
     else if (a === 'dismiss') { S.note = ''; S.noteErr = false; render(); }
