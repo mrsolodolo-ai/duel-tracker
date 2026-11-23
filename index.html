@@ -162,6 +162,11 @@ table.stand .sub { display: none; }
 .quick { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
 .quick .btn { flex: none; }
 .quick.flow { flex-wrap: wrap; overflow: visible; }
+.find { appearance: none; -webkit-appearance: none; background: var(--field); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; width: 100%; min-width: 0; font-size: 16px; }
+.find::placeholder { color: var(--muted); opacity: 1; }
+.found:empty { display: none; }
+.found { display: flex; flex-direction: column; gap: 6px; }
+.btn[aria-pressed="true"] { border-color: var(--accent); }
 
 input[type="text"], input:not([type]), select, textarea { background: var(--field); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; width: 100%; min-width: 0; }
 textarea { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; min-height: 120px; resize: vertical; }
@@ -1923,11 +1928,11 @@ details[open] > summary { margin-bottom: 10px; }
     // A saved name from outside the alliance shows in the typed-name box instead.
     const inLog = !!(me && P[meK] && isMate(P[meK]));
     const manual = !dm && (S.meManual || (!!me && !inLog));
-    const opts = memoSel(id, [FIK, meK, inLog, manual, team].join('|'), () => {
+    const opts = memoSel(id, [FIK, meK, inLog, manual, team, S.stageState].join('|'), () => {
       const G = groupInfo(), many = G.roots.length > 1;
       const mates = Object.values(P).filter(isMate).sort((x, y) => byName(x.name, y.name));
       let o = option('', 'Pick your name', !inLog || manual, true);
-      if (mates.length) o += `<optgroup label="${esc(team)} · your alliance">${mates.map((p) => option(p.name, many && G.label[G.comp[p.key]] ? `${p.name} · ${G.label[G.comp[p.key]]}` : p.name, !manual && inLog && p.key === meK)).join('')}</optgroup>`;
+      if (mates.length) o += `<optgroup label="${esc(team)} · your alliance">${mates.map((p) => option(p.name, meLabel(p, many, G), !manual && inLog && p.key === meK)).join('')}</optgroup>`;
       if (!dm) o += option(OTHER, 'I’m not on this list', manual);
       return o;
     });
@@ -1951,16 +1956,26 @@ details[open] > summary { margin-bottom: 10px; }
     const P = fullIndex().players, meK = key(settings().me), sk = key(S.opp);
     const inLog = !!(S.opp && P[sk]);
     const manual = S.oppManual || (!!S.opp && !inLog);
-    const opts = memoSel('opp-pick', [FIK, meK, sk, inLog, manual].join('|'), () => {
+    const opts = memoSel('opp-pick', [FIK, meK, sk, inLog, manual, S.stageState].join('|'), () => {
       const G = groupInfo(), mine = P[meK] ? G.comp[meK] : null;
       const all = Object.values(P).filter((p) => p.key !== meK);
       const list = (ps) => ps.sort((x, y) => byName(x.name, y.name)).map((p) => option(p.name, p.name, !manual && inLog && p.key === sk)).join('');
       let o = option('', 'Pick your opponent', !inLog || manual, true);
       if (G.roots.length > 1) {
-        const order = mine ? [mine].concat(G.roots.filter((r) => r !== mine)) : G.roots;
+        // The semi-final groups first (the visitor's own on top, each in the order the game lists it), then everyone who went out.
+        const here = new Set(), sfMe = sfOf(settings().me);
+        if (S.stage) {
+          const gs = Object.keys(S.stage.groups).sort();
+          (sfMe ? [sfMe.g].concat(gs.filter((g) => g !== sfMe.g)) : gs).forEach((g) => {
+            const ps = S.stage.groups[g].map((n) => P[key(n)]).filter((p) => p && p.key !== meK);
+            ps.forEach((p) => here.add(p.key));
+            if (ps.length) o += `<optgroup label="Semi-final group ${esc(g)}${sfMe && g === sfMe.g ? ' (yours)' : ''}">${ps.map((p) => option(p.name, p.name, !manual && inLog && p.key === sk)).join('')}</optgroup>`;
+          });
+        }
+        const order = S.stage ? G.roots : mine ? [mine].concat(G.roots.filter((r) => r !== mine)) : G.roots;
         order.forEach((r) => {
-          const ps = all.filter((p) => G.comp[p.key] === r);
-          if (ps.length) o += `<optgroup label="${esc(groupName(G, r))}${r === mine ? ' (yours)' : ''}">${list(ps)}</optgroup>`;
+          const ps = all.filter((p) => G.comp[p.key] === r && !here.has(p.key));
+          if (ps.length) o += `<optgroup label="${esc(S.stage ? (G.label[r] ? 'Out in the qualifier · group ' + G.label[r] : 'Other players') : groupName(G, r))}${r === mine && !S.stage ? ' (yours)' : ''}">${list(ps)}</optgroup>`;
         });
       } else o += list(all);
       return o + option(OTHER, 'Someone not on this list', manual);
@@ -2220,8 +2235,11 @@ details[open] > summary { margin-bottom: 10px; }
     const noNext = !isDemo() && qualDone();
     const likely = noNext ? [] : likelyOpps().filter((x) => key(x.name) !== key(S.opp));
     const src = isDemo() ? 'example squads' : valid(S.personal.myForm) ? 'entered by hand' + (mine ? ' · <button type="button" class="linkbtn" data-act="melog">Use my latest battle report</button>' : '') : mine ? `from your round ${esc(mine.round)} report` : '';
-    const rx = raceOf(meName);
-    const raceLine = !rx ? '' : noNext
+    const rx = raceOf(meName), sfMe = sfOf(meName);
+    const sfMates = sfMe ? S.stage.groups[sfMe.g].filter((n) => key(n) !== key(meName) && ix.players[key(n)]) : [];
+    const raceLine = !rx ? '' : noNext && sfMe
+      ? `<p class="meta"><b>Semi-final group ${esc(sfMe.g)}</b> · qualified ${ordinal(rx.i + 1)} in group ${esc(rx.g)} · <a href="#race">Top 8</a></p>`
+      : noNext
       ? `<p class="meta">Finished <b>${ordinal(rx.i + 1)}</b> in group ${esc(rx.g)}${rx.r[3] >= 0.5 ? ' · through to the semi-finals' : ''} · <a href="#race">Top 8</a></p>`
       : `<p class="meta">Top 8 chance: <b>${pct(rx.r[3])}</b> · #${rx.i + 1} in group ${esc(rx.g)} · <a href="#race">The race</a></p>`;
     const meNote = mf ? `<div class="row">${orderHTML(mf)}<span class="meta">${src}</span></div>`
@@ -2230,9 +2248,10 @@ details[open] > summary { margin-bottom: 10px; }
 
     let opp = `<section class="card c-opp" aria-labelledby="h-opp">
       <div class="card-h"><h2 id="h-opp">Matchup</h2></div>
-      <div class="field"><label class="lbl" for="me-pick">You</label>${meSelect('me-pick')}${meNote}${raceLine}</div>
+      <div class="field"><label class="lbl" for="me-pick">You</label>${isDemo() ? '' : findBox('me')}${meSelect('me-pick')}${meNote}${raceLine}</div>
       <div class="vsd" aria-hidden="true">vs</div>
-      <div class="field"><label class="lbl" for="opp-pick">Opponent</label>${oppSelect()}</div>
+      <div class="field"><label class="lbl" for="opp-pick">Opponent</label>${isDemo() ? '' : findBox('opp')}${oppSelect()}</div>
+      ${sfMates.length ? `<div class="stack"><span class="lbl">Your semi-final group ${esc(sfMe.g)}</span><div class="quick flow" role="group" aria-label="Your semi-final opponents">${sfMates.map((n) => `<button type="button" class="btn small" data-act="opp" data-name="${esc(n)}"${key(n) === key(S.opp) ? ' aria-pressed="true"' : ''}>${esc(short(n))}</button>`).join('')}</div></div>` : ''}
       ${likely.length ? `<div class="stack"><span class="lbl">${likely[0].chance != null ? (S.race && S.race.round ? `Likely opponent in round ${S.race.round + 1}` : 'Likely opponents') : 'Likely opponents, by record'}</span><div class="quick flow" role="group" aria-label="Likely next opponents">${likely.map((x) => `<button type="button" class="btn small" data-act="opp" data-name="${esc(x.name)}">${esc(short(x.name.replace(/^\[Example\] /, '')))} <span class="rec">${x.chance != null ? pct(x.chance) : `${x.w}–${x.l}`}</span></button>`).join('')}</div></div>` : ''}`;
     const manualOpp = S.oppManual || (!!S.opp && !pl);
     if (S.opp || manualOpp) {
@@ -2381,7 +2400,8 @@ details[open] > summary { margin-bottom: 10px; }
     const meK = key(settings().me), met = es.filter((e) => e.oppKey === meK);
     if (met.length) { const last = met[met.length - 1]; facts.push({ t: `Rematch: you ${last.won ? 'lost' : 'won'} round ${last.round}`, hot: true }); }
     const orx = raceOf(pl.name);
-    if (orx) facts.push({ t: qualDone() ? `Finished ${ordinal(orx.i + 1)} in group ${orx.g}${orx.r[3] >= 0.5 ? ', through' : ''}` : `Top 8 chance ${pct(orx.r[3])}`, hot: false });
+    const osf = sfOf(pl.name);
+    if (orx) facts.push({ t: qualDone() ? (osf ? `Semi-final group ${osf.g} · ${ordinal(orx.i + 1)} in group ${orx.g}` : `Finished ${ordinal(orx.i + 1)} in group ${orx.g}${orx.r[3] >= 0.5 ? ', through' : ''}`) : `Top 8 chance ${pct(orx.r[3])}`, hot: false });
     facts.push({ t: orx ? `${recOf(orx.r, S.race.round)} record` : `${wins}–${n - wins} record`, hot: false });
     return `<div class="facts" role="list" aria-label="Key facts">${facts.map((f) => `<span role="listitem" class="fact${f.hot ? ' hot' : ''}">${esc(f.t)}</span>`).join('')}</div>`;
   }
@@ -2871,6 +2891,53 @@ details[open] > summary { margin-bottom: 10px; }
   }
 
   /* ---------- Top 8: the race to advance (data/race.json, simulated at each daily import) ---------- */
+  /* ---------- the stage being played: the semi-final groups (data/stage.json) ---------- */
+  let SFIX = null;
+  function loadStage() {
+    if (S.stageState) return;
+    S.stageState = 'loading';
+    fetch('data/stage.json', { cache: 'no-cache' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { S.stage = d && d.groups ? d : null; S.stageState = S.stage ? 'ok' : 'none'; SFIX = null; render(); })
+      .catch(() => { S.stageState = 'none'; render(); });
+  }
+  // A player's semi-final group: { g: its letter, i: place in the game's own list } or null (out, or no draw on file).
+  function sfOf(name) {
+    if (!S.stage || !name) return null;
+    if (!SFIX) { SFIX = new Map(); Object.keys(S.stage.groups).forEach((g) => S.stage.groups[g].forEach((n, i) => SFIX.set(key(n), { g, i }))); }
+    return SFIX.get(key(name)) || null;
+  }
+  // What follows a name in the You list: the semi-final group once the draw is on file, else the qualifier group.
+  const meLabel = (pl, many, G) => {
+    const sf = sfOf(pl.name), q = many && G.label[G.comp[pl.key]];
+    return sf ? `${pl.name} · semi-final ${sf.g}` : q ? `${pl.name} · ${S.stage ? 'out, group ' : ''}${q}` : pl.name;
+  };
+  /* ---------- search boxes over the two pickers on Next fight ---------- */
+  const FIND = { me: '', opp: '' };
+  // Letters and digits only, lower case, accents dropped: "skye" finds "ᐧSkyeᐧ", "teng" finds "Taibae 戰神 TENG".
+  const findNorm = (v) => { const t = String(v || '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase(); return t.replace(/[^\p{L}\p{N}]+/gu, '') || t.trim(); };
+  function findHits(side, q) {
+    const n = findNorm(q);
+    if (!n) return null;
+    const meK = key(settings().me), pool = side === 'me' ? allianceMates() : Object.values(fullIndex().players).filter((pl) => pl.key !== meK), hits = [];
+    pool.forEach((pl) => { const at = (pl.fnorm || (pl.fnorm = findNorm(pl.name))).indexOf(n); if (at >= 0) hits.push({ pl, at, sf: sfOf(pl.name) }); });
+    // names that start with what was typed first, then players still in the event, then by name
+    hits.sort((x, y) => (x.at ? 1 : 0) - (y.at ? 1 : 0) || (x.sf ? 0 : 1) - (y.sf ? 0 : 1) || byName(x.pl.name, y.pl.name));
+    return hits;
+  }
+  function findHTML(side) {
+    const q = FIND[side], hits = findHits(side, q);
+    if (!hits) return '';
+    if (!hits.length) return `<p class="meta">No ${side === 'me' ? 'alliance member' : 'player'} found for “${esc(String(q).trim())}”.</p>`;
+    const tag = (h) => (h.sf ? 'group ' + h.sf.g : S.stage ? 'out' : '');
+    return `<div class="quick flow" role="group" aria-label="Search results">${hits.slice(0, 8).map((h) => `<button type="button" class="btn small" data-act="find-${side}" data-name="${esc(h.pl.name)}">${esc(short(h.pl.name))}${tag(h) ? ` <span class="rec">${tag(h)}</span>` : ''}</button>`).join('')}</div>` +
+      (hits.length > 8 ? `<p class="meta">${hits.length - 8} more. Keep typing to narrow it down.</p>` : '');
+  }
+  const findBox = (side) => `<input id="${side}-find" class="find" type="search" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="search" placeholder="${side === 'me' ? 'Search your name' : 'Search any player'}" aria-label="${side === 'me' ? 'Search your name' : 'Search for an opponent'}" value="${esc(FIND[side])}"><div id="${side}-found" class="found">${findHTML(side)}</div>`;
+  function findPick(side, name) {
+    FIND[side] = '';
+    if (side === 'me') pickMe(name); else { setOpp(name); S.oppOpen = false; render(); }
+  }
   function loadRace() {
     if (S.raceState) return;
     S.raceState = 'loading';
@@ -3459,6 +3526,7 @@ details[open] > summary { margin-bottom: 10px; }
     if (!el) return;
     const a = el.dataset.act;
     if (a === 'od-more') { odMore(); return; }
+    if (a === 'find-me' || a === 'find-opp') { findPick(a === 'find-me' ? 'me' : 'opp', el.dataset.name); return; }
     if (a === 'real') { S.forceReal = true; location.hash = '#next'; render(); }
     else if (a === 'dismiss') { S.note = ''; S.noteErr = false; render(); }
     else if (a === 'opp') { setOpp(el.dataset.name); S.oppOpen = false; render(); }
@@ -3499,11 +3567,25 @@ details[open] > summary { margin-bottom: 10px; }
     else if (a === 'calapply' && S.cal && canAdmin()) { S.shared.bonus2 = S.cal.best.bonus; S.shared.sigma2 = S.cal.best.sigma; saveShared(); render(); }
   });
 
+  document.addEventListener('keydown', (ev) => {
+    const t = ev.target;
+    if (ev.key !== 'Enter' || !t || (t.id !== 'me-find' && t.id !== 'opp-find')) return;
+    ev.preventDefault();
+    const side = t.id === 'me-find' ? 'me' : 'opp', hits = findHits(side, t.value);
+    if (hits && hits.length) findPick(side, hits[0].pl.name);
+  });
   const isPick = (ev) => ev.inputType === 'insertReplacementText' || ev.inputType == null;
   document.addEventListener('input', (ev) => {
     const t = ev.target;
     if (t.dataset && t.dataset.target && t.dataset.slot != null) { const d = draftOf(t.dataset.target); if (d) d[+t.dataset.slot].p = t.value; return; }
     if (t.id === 'st-find') { S.stFind = t.value; render(); return; }
+    if (t.id === 'me-find' || t.id === 'opp-find') {
+      // fill the list under the box in place: redrawing the whole tab on every key would be slow on a phone
+      const side = t.id === 'me-find' ? 'me' : 'opp', box = document.getElementById(side + '-found');
+      FIND[side] = t.value;
+      if (box) box.innerHTML = findHTML(side);
+      return;
+    }
     if (t.id === 'opp-name') {
       S.oppText = t.value;
       if (isPick(ev) && fullIndex().players[key(t.value)]) { setOpp(t.value); render(); }
@@ -3591,7 +3673,7 @@ details[open] > summary { margin-bottom: 10px; }
   function snapshotState() { const o = {}; HOT_KEYS.forEach((k) => { o[k] = S[k]; }); return JSON.parse(JSON.stringify(o)); }
   function start(hot) {
     if (hot && typeof hot === 'object') HOT_KEYS.forEach((k) => { if (k in hot && k !== 'view') S[k] = hot[k]; });
-    fromHash(); draw(); initStore(); loadBundle();
+    fromHash(); draw(); initStore(); loadBundle(); loadStage();
   }
   const hot = window.claude && window.claude.hot;
   try { if (hot && typeof hot.snapshot === 'function') hot.snapshot(snapshotState); } catch (e) { /* ignore */ }
