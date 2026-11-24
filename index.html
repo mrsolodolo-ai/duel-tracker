@@ -364,6 +364,16 @@ details[open] > summary { margin-bottom: 10px; }
 @keyframes od-stamp { from { opacity: 0; transform: scale(1.5); } to { opacity: 1; transform: none; } }
 @media (max-width: 462px) { .od { max-width: none; margin: 0 -16px; border-radius: 0; } }
 @media (prefers-reduced-motion: reduce) { .od, .od * { animation: none !important; transition: none !important; } }
+.sfx { margin: 8px 0 0; font-size: 13px; }
+.sfx summary { cursor: pointer; font-weight: 600; text-transform: none; letter-spacing: 0; }
+.sfx ul { list-style: none; margin: 6px 0 4px; padding: 0; }
+.sfx li { display: flex; align-items: center; gap: 8px; padding: 3px 0; border-top: 1px solid var(--line, rgba(128, 128, 128, .25)); flex-wrap: wrap; }
+.sfx-n { min-width: 62px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sfx-o { min-width: 110px; flex: 1 1 110px; }
+.sfx-v { color: var(--muted); min-width: 92px; }
+.sfx-w { color: var(--good, #2e7d32); }
+.sfx-l { color: var(--bad, #c62828); }
+.od-done { opacity: .7; font-size: 11px; }
 </style>
 </head>
 <body>
@@ -1627,7 +1637,7 @@ details[open] > summary { margin-bottom: 10px; }
     view: 'next',
     opp: '', oppText: null, oppForm: null, oppEdited: false, oppVersion: -1, oppResult: null, shownPerm: null, roll: null,
     oppManual: false, oppOpen: false, meManual: false, meText: null,
-    bundle: [], bundleState: 'loading', logAll: false,
+    bundle: [], sfF: [], sf: null, sfState: '', bundleState: 'loading', logAll: false,
     sel: null, forceReal: false, lastDemo: undefined, cal: null, busy: '',
     form: null, formMsg: '', confirm: null,
     meDraft: null, importText: '', importMsg: '', copyMsg: '', wipe: 0, showAll: false, showExport: false
@@ -1674,7 +1684,7 @@ details[open] > summary { margin-bottom: 10px; }
   let DEMO = null;
   const demo = () => DEMO || (DEMO = E.exampleData(2026));
   // Fights come from two places: battle reports shipped with the page (data/reports.json) and fights logged in the shared database.
-  const allBattles = () => (S.bundle.length ? S.bundle.concat(S.battles) : S.battles);
+  const allBattles = () => (S.bundle.length ? S.bundle.concat(S.sfF, S.battles) : S.battles);      // sfF: the semi-final fights (data/sf.json), rounds 33+
   const isDemo = () => !S.battles.length && !S.bundle.length && !S.personal.myForm && !S.forceReal && S.bundleState !== 'loading';
   const battles = () => (isDemo() ? demo().battles : allBattles());
   function baseSettings() {
@@ -1712,7 +1722,8 @@ details[open] > summary { margin-bottom: 10px; }
     const parent = {};
     const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
     Object.keys(ix.players).forEach((k) => { parent[k] = k; });
-    ix.battles.forEach((b) => { const ra = find(key(b.a.name)), rb = find(key(b.b.name)); if (ra !== rb) parent[ra] = rb; });
+    // Only qualifier fights make groups: from the semi-finals on, players of different qualifier groups meet.
+    ix.battles.forEach((b) => { if (b.round > QUAL_ROUNDS) return; const ra = find(key(b.a.name)), rb = find(key(b.b.name)); if (ra !== rb) parent[ra] = rb; });
     const comp = {}, size = {}, votes = {};
     Object.keys(parent).forEach((k) => { const r = find(k); comp[k] = r; size[r] = (size[r] || 0) + 1; });
     ix.battles.forEach((b) => { if (!b.g) return; const r = comp[key(b.a.name)], v = votes[r] || (votes[r] = {}); v[b.g] = (v[b.g] || 0) + 1; });
@@ -1738,7 +1749,7 @@ details[open] > summary { margin-bottom: 10px; }
     const sr = scopeRoots();
     if (!sr) return battles();
     const G = groupInfo(), keep = new Set(sr);
-    return G.ix.battles.filter((b) => keep.has(G.comp[key(b.a.name)]));
+    return G.ix.battles.filter((b) => keep.has(G.comp[key(b.a.name)]) || (b.round > QUAL_ROUNDS && keep.has(G.comp[key(b.b.name)])));
   }
 
   let M = null, MK = '', WF = null, WFME = null;
@@ -1967,7 +1978,7 @@ details[open] > summary { margin-bottom: 10px; }
     const opts = memoSel('opp-pick', [FIK, meK, sk, inLog, manual, S.stageState].join('|'), () => {
       const G = groupInfo(), mine = P[meK] ? G.comp[meK] : null;
       const all = Object.values(P).filter((p) => p.key !== meK);
-      const list = (ps) => ps.sort((x, y) => byName(x.name, y.name)).map((p) => option(p.name, p.name, !manual && inLog && p.key === sk)).join('');
+      const list = (ps) => ps.sort((x, y) => byName(x.name, y.name)).map((p) => option(p.name, dn(p.name), !manual && inLog && p.key === sk)).join('');
       let o = option('', 'Pick your opponent', !inLog || manual, true);
       if (G.roots.length > 1) {
         // The semi-final groups first (the visitor's own on top, each in the order the game lists it), then everyone who went out.
@@ -1977,7 +1988,7 @@ details[open] > summary { margin-bottom: 10px; }
           (sfMe ? [sfMe.g].concat(gs.filter((g) => g !== sfMe.g)) : gs).forEach((g) => {
             const ps = S.stage.groups[g].map((n) => P[key(n)]).filter((p) => p && p.key !== meK);
             ps.forEach((p) => here.add(p.key));
-            if (ps.length) o += `<optgroup label="Semi-final group ${esc(g)}${sfMe && g === sfMe.g ? ' (yours)' : ''}">${ps.map((p) => option(p.name, p.name, !manual && inLog && p.key === sk)).join('')}</optgroup>`;
+            if (ps.length) o += `<optgroup label="Semi-final group ${esc(g)}${sfMe && g === sfMe.g ? ' (yours)' : ''}">${ps.map((p) => option(p.name, dn(p.name), !manual && inLog && p.key === sk)).join('')}</optgroup>`;
           });
         }
         const order = S.stage ? G.roots : mine ? [mine].concat(G.roots.filter((r) => r !== mine)) : G.roots;
@@ -2196,7 +2207,9 @@ details[open] > summary { margin-bottom: 10px; }
       let when = '';
       try { if (S.race && S.race.asOf && S.race.round === lr) when = new Date(S.race.asOf).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); } catch (e) { when = ''; }
       const lastQ = (S.race && S.race.rounds) || QUAL_ROUNDS;
-      notes += lr >= lastQ
+      notes += lr > lastQ
+        ? `<div class="note asof" id="asof"><p><b>Reports through semi-final day ${Math.floor((lr - lastQ - 1) / 6) + 1}${S.sf && S.sf.date ? ` (${esc(S.sf.date)})` : ''}.</b> Later fights are added once a day, after the day's fights are complete. Semi-final fights are numbered on from the qualifier: rounds 33 to 38 are day 1, six a day.</p></div>`
+        : lr >= lastQ
         ? `<div class="note asof" id="asof"><p><b>Reports through round ${lr}, the last qualifier round${when ? ` (last update ${esc(when)})` : ''}.</b> Matches played after that are not included until their reports are added: once a day, after the day's rounds are complete.</p></div>`
         : `<div class="note asof" id="asof"><p><b>Reports through round ${lr}.</b> Today's matches are not included until the day's rounds are complete. Reports are added once a day${when ? ` (last update ${esc(when)})` : ''}.</p></div>`;
     }
@@ -2242,7 +2255,7 @@ details[open] > summary { margin-bottom: 10px; }
     const mine = myLog(), meName = settings().me, hasLog = ix.battles.length > 0;
     const noNext = !isDemo() && qualDone();
     const likely = noNext ? [] : likelyOpps().filter((x) => key(x.name) !== key(S.opp));
-    const src = isDemo() ? 'example squads' : valid(S.personal.myForm) ? 'entered by hand' + (mine ? ' · <button type="button" class="linkbtn" data-act="melog">Use my latest battle report</button>' : '') : mine ? `from your round ${esc(mine.round)} report` : '';
+    const src = isDemo() ? 'example squads' : valid(S.personal.myForm) ? 'entered by hand' + (mine ? ' · <button type="button" class="linkbtn" data-act="melog">Use my latest battle report</button>' : '') : mine ? `from your ${esc(rn(mine.round))} report` : '';
     const rx = raceOf(meName), sfMe = sfOf(meName);
     const sfMates = sfMe ? S.stage.groups[sfMe.g].filter((n) => key(n) !== key(meName) && ix.players[key(n)]) : [];
     const raceLine = !rx ? '' : noNext && sfMe
@@ -2250,22 +2263,25 @@ details[open] > summary { margin-bottom: 10px; }
       : noNext
       ? `<p class="meta">Finished <b>${ordinal(rx.i + 1)}</b> in group ${esc(rx.g)}${rx.r[3] >= 0.5 ? ' · through to the semi-finals' : ''} · <a href="#race">Top 8</a></p>`
       : `<p class="meta">Top 8 chance: <b>${pct(rx.r[3])}</b> · #${rx.i + 1} in group ${esc(rx.g)} · <a href="#race">The race</a></p>`;
+    const stMe = sfStand(meName);
+    const sfLine = stMe ? `<p class="meta" id="sf-me">After semi-final day ${S.sf.day}: <b>${ordinal(stMe.pos)}</b> in group ${esc(stMe.g)} on ${fmtSc(stMe.score)} · ${stMe.won} of ${plural(stMe.n, 'round')} won · the table is by total score</p>` : '';
     const meNote = mf ? `<div class="row">${orderHTML(mf)}<span class="meta">${src}</span></div>`
       : meName ? `<p class="meta">No fights are on record under this name yet, so there is nothing to simulate.</p>`
       : `<p class="meta">${hasLog ? 'Your squads fill in from your latest battle report.' : 'Your squads fill in once battle reports are loaded.'}</p>`;
 
     let opp = `<section class="card c-opp" aria-labelledby="h-opp">
       <div class="card-h"><h2 id="h-opp">Matchup</h2></div>
-      <div class="field"><label class="lbl" for="me-pick">You</label>${isDemo() ? '' : findBox('me')}${meSelect('me-pick')}${meNote}${raceLine}</div>
+      <div class="field"><label class="lbl" for="me-pick">You</label>${isDemo() ? '' : findBox('me')}${meSelect('me-pick')}${meNote}${raceLine}${sfLine}</div>
       <div class="vsd" aria-hidden="true">vs</div>
       <div class="field"><label class="lbl" for="opp-pick">Opponent</label>${isDemo() ? '' : findBox('opp')}${oppSelect()}</div>
-      ${sfMates.length ? `<div class="stack"><span class="lbl">Your semi-final group ${esc(sfMe.g)}</span><div class="quick flow" role="group" aria-label="Your semi-final opponents">${sfMates.map((n) => `<button type="button" class="btn small" data-act="opp" data-name="${esc(n)}"${key(n) === key(S.opp) ? ' aria-pressed="true"' : ''}>${esc(short(n))}</button>`).join('')}</div></div>` : ''}
+      ${sfMates.length ? `<div class="stack"><span class="lbl">Your semi-final group ${esc(sfMe.g)}</span><div class="quick flow" role="group" aria-label="Your semi-final opponents">${sfMates.map((n) => `<button type="button" class="btn small" data-act="opp" data-name="${esc(n)}"${key(n) === key(S.opp) ? ' aria-pressed="true"' : ''}>${esc(short(nowOf(n) || n))}${sfMeeting(meName, n) ? ' <span class="rec">played</span>' : ''}</button>`).join('')}</div></div>` : ''}
       ${likely.length ? `<div class="stack"><span class="lbl">${likely[0].chance != null ? (S.race && S.race.round ? `Likely opponent in round ${S.race.round + 1}` : 'Likely opponents') : 'Likely opponents, by record'}</span><div class="quick flow" role="group" aria-label="Likely next opponents">${likely.map((x) => `<button type="button" class="btn small" data-act="opp" data-name="${esc(x.name)}">${esc(short(x.name.replace(/^\[Example\] /, '')))} <span class="rec">${x.chance != null ? pct(x.chance) : `${x.w}–${x.l}`}</span></button>`).join('')}</div></div>` : ''}`;
     const manualOpp = S.oppManual || (!!S.opp && !pl);
     if (S.opp || manualOpp) {
       const open = manualOpp || S.oppOpen || S.oppEdited;
-      opp += `<p class="meta">${latest ? `On record: ${plural(pl.entries.length, 'fight')}, through round ${esc(latest.round)}.` : 'Not in the log yet. Enter the formation their battle record shows.'}</p>`;
+      opp += `<p class="meta">${latest ? `On record: ${plural(pl.entries.length, 'fight')}, through ${esc(rn(latest.round))}.` : 'Not in the log yet. Enter the formation their battle record shows.'}</p>`;
       opp += keyFacts(pl);
+      opp += sfBlock(pl);
       if (!open) {
         opp += `<div class="stack"><div class="lbl"><span>Their usual order</span><span class="hint">${usual ? `${usual.n} of ${plural(usual.of, 'fight')}` : 'Slot 1 fights first'}</span></div>${orderHTML(usual ? usual.form : valid(S.oppForm) || latest.form)}
           ${usual && usual.lastK !== usual.k ? `<p class="meta" id="lately">Lately they switched: ${minis(usual.lastForm)} in their last ${plural(usual.run, 'reported fight')}.</p>` : ''}
@@ -2406,7 +2422,7 @@ details[open] > summary { margin-bottom: 10px; }
     if (sg && sg.dodges) facts.push({ t: `Strong squad (${TS[sg.q.t]}) dodges counters`, hot: true });
     else if (sg && !sameAll && sg.pairs >= 3 && sg.moves === 0) facts.push({ t: `Strong squad (${TS[sg.q.t]}) always ${ORD[sg.slot]}`, hot: true });
     const meK = key(settings().me), met = es.filter((e) => e.oppKey === meK);
-    if (met.length) { const last = met[met.length - 1]; facts.push({ t: `Rematch: you ${last.won ? 'lost' : 'won'} round ${last.round}`, hot: true }); }
+    if (met.length) { const last = met[met.length - 1]; facts.push({ t: `Rematch: you ${last.won ? 'lost' : 'won'} ${rn(last.round)}`, hot: true }); }
     const orx = raceOf(pl.name);
     const osf = sfOf(pl.name);
     if (orx) facts.push({ t: qualDone() ? (osf ? `Semi-final group ${osf.g} · ${ordinal(orx.i + 1)} in group ${orx.g}` : `Finished ${ordinal(orx.i + 1)} in group ${orx.g}${orx.r[3] >= 0.5 ? ', through' : ''}`) : `Top 8 chance ${pct(orx.r[3])}`, hot: false });
@@ -2531,7 +2547,7 @@ details[open] > summary { margin-bottom: 10px; }
       <div class="card-h"><h2 id="h-hero">Play this order</h2><span class="stamp">vs ${esc(short(S.opp))}</span></div>
       ${permHTML(pr.myCanon, b, true)}
       <div class="big-row"><span class="big-num">${pct(ev)}</span><span class="cap">chance to win, going by how they have lined up so far</span></div>
-      ${pr.tend ? `<p class="meta" id="built-on">Built on their tendencies in ${plural(pr.nFights, 'reported fight')}, through round ${esc(pr.lastRound)}. Anything they have played since is not included.</p>` : pr.known ? `<p class="meta" id="built-on">Built on their ${plural(pr.nFights, 'reported fight')} and the order you entered from the game.</p>` : ''}
+      ${pr.tend ? `<p class="meta" id="built-on">Built on their tendencies in ${plural(pr.nFights, 'reported fight')}, through ${esc(rn(pr.lastRound))}. Anything they have played since is not included.</p>` : pr.known ? `<p class="meta" id="built-on">Built on their ${plural(pr.nFights, 'reported fight')} and the order you entered from the game.</p>` : ''}
       ${strengthNote(pr)}
       ${pointsLine(pr, plan)}
       ${ovLine(ovi)}
@@ -2557,7 +2573,7 @@ details[open] > summary { margin-bottom: 10px; }
     else if (pr.theirLastPerm === top) lead = `Most likely they repeat the order the game shows now (${pct(pr.p[top])}).`;
     else lead = `Most likely they switch away from the order the game shows now (${pct(pr.p[top])} on the top pick).`;
     const basis = pr.tend
-      ? `The odds blend how they tend to decide (${pct(E.TEND.model)}), how often they have played each order (${pct(E.TEND.freq)}) and room for a surprise (${pct(E.TEND.even)}), from ${plural(pr.nFights, 'reported fight')} through round ${esc(pr.lastRound)}. Anything they have played since is not included.`
+      ? `The odds blend how they tend to decide (${pct(E.TEND.model)}), how often they have played each order (${pct(E.TEND.freq)}) and room for a surprise (${pct(E.TEND.even)}), from ${plural(pr.nFights, 'reported fight')} through ${esc(rn(pr.lastRound))}. Anything they have played since is not included.`
       : pr.known
       ? `Based on ${plural(pr.nFights, 'reported fight')} plus the order you entered. Players with few fights lean on how the whole log behaves.`
       : 'No fights on record for this player, so this uses how opponents in the log usually play.';
@@ -2901,6 +2917,51 @@ details[open] > summary { margin-bottom: 10px; }
   /* ---------- Top 8: the race to advance (data/race.json, simulated at each daily import) ---------- */
   /* ---------- the stage being played: the semi-final groups (data/stage.json) ---------- */
   let SFIX = null;
+  // The semi-final fights: same records as data/reports.json, rounds numbered on from the qualifier (33 to 38 are day 1),
+  // plus the group tables by score and the players renamed since the qualifier (log name -> name in the game today).
+  function loadSF() {
+    if (S.sfState) return;
+    S.sfState = 'loading';
+    fetch('data/sf.json', { cache: 'no-cache' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d && Array.isArray(d.fights)) { S.sf = d; S.sfF = d.fights.filter((b) => b && b.a && b.b); S.sfState = 'ok'; SFM = null; try { OD.opts = null; } catch (e) { /* odds not built yet */ } bump(); }
+        else S.sfState = 'none';
+        render();
+      })
+      .catch(() => { S.sfState = 'none'; render(); });
+  }
+  const nowOf = (name) => (S.sf && S.sf.now && S.sf.now[name]) || '';
+  const dn = (name) => (nowOf(name) ? `${name} (now ${nowOf(name)})` : name);
+  // "round 12", or for the stages after the qualifier "semi-final day 1, fight 5" (six fights a day)
+  const rn = (r) => { r = +r; if (!(r > QUAL_ROUNDS)) return 'round ' + r; const k = r - QUAL_ROUNDS - 1; return `semi-final day ${Math.floor(k / 6) + 1}, fight ${(k % 6) + 1}`; };
+  const fmtSc = (v) => (v / 1e6).toFixed(2) + 'M';
+  // Place in the semi-final group table (by total score) once fights are in: { g, pos, score, won, n }
+  function sfStand(name) {
+    const at = sfOf(name), rows = at && S.sf && S.sf.table ? S.sf.table[at.g] : null;
+    if (!rows) return null;
+    const i = rows.findIndex((r) => key(r[0]) === key(name));
+    return i < 0 || !rows[i][3] ? null : { g: at.g, pos: i + 1, score: rows[i][1], won: rows[i][2], n: rows[i][3] };
+  }
+  // The semi-final meeting of two players, if it is played: rounds won by each and the day
+  let SFM = null;
+  function sfMeeting(a, b) {
+    if (!S.sfF.length) return null;
+    if (!SFM) { SFM = new Map(); S.sfF.forEach((f) => { const x = key(f.a.name), y = key(f.b.name), k = x < y ? x + '|' + y : y + '|' + x, m = SFM.get(k) || SFM.set(k, { w: {}, last: 0 }).get(k); const w = f.win === 'a' ? x : y; m.w[w] = (m.w[w] || 0) + 1; m.last = Math.max(m.last, +f.round); }); }
+    const x = key(a), y = key(b), m = SFM.get(x < y ? x + '|' + y : y + '|' + x);
+    return m ? { wa: m.w[x] || 0, wb: m.w[y] || 0, day: Math.floor((m.last - QUAL_ROUNDS - 1) / 6) + 1 } : null;
+  }
+  // Under the opponent on Next fight: what he fielded in every semi-final fight, newest day first
+  function sfBlock(pl) {
+    const es = pl ? pl.entries.filter((e) => e.round > QUAL_ROUNDS) : [];
+    if (!es.length) return '';
+    const st = sfStand(pl.name), won = es.filter((e) => e.won).length;
+    const row = (e) => {
+      const k = e.round - QUAL_ROUNDS - 1, ov = e.ex && e.ex.ov != null ? e.form.find((q) => q.id === e.ex.ov) : null;
+      return `<li><span class="sfx-n">Day ${Math.floor(k / 6) + 1} · ${(k % 6) + 1}</span><span class="sfx-o">v ${esc(short(nowOf(e.oppName) || e.oppName))}</span>${minis(e.form)}<span class="sfx-v">${ov ? 'Overlord ' + TS[ov.t] : ''}</span><b class="${e.won ? 'sfx-w' : 'sfx-l'}">${e.won ? 'won' : 'lost'}</b></li>`;
+    };
+    return `<details class="sfx" id="sfx" open><summary>Semi-finals: ${won} of ${plural(es.length, 'round')} won${st ? ` · ${ordinal(st.pos)} in group ${esc(st.g)} on ${fmtSc(st.score)}` : ''}</summary><ul>${es.slice().reverse().map(row).join('')}</ul><p class="meta">Order of his squads in each fight, slot 1 first. Each opponent is met three times in a row.</p></details>`;
+  }
   function loadStage() {
     if (S.stageState) return;
     S.stageState = 'loading';
@@ -2918,7 +2979,7 @@ details[open] > summary { margin-bottom: 10px; }
   // What follows a name in the You list: the semi-final group once the draw is on file, else the qualifier group.
   const meLabel = (pl, many, G) => {
     const sf = sfOf(pl.name), q = many && G.label[G.comp[pl.key]];
-    return sf ? `${pl.name} · semi-final ${sf.g}` : q ? `${pl.name} · ${S.stage ? 'out, group ' : ''}${q}` : pl.name;
+    return sf ? `${dn(pl.name)} · semi-final ${sf.g}` : q ? `${pl.name} · ${S.stage ? 'out, group ' : ''}${q}` : pl.name;
   };
   /* ---------- search boxes over the two pickers on Next fight ---------- */
   const FIND = { me: '', opp: '' };
@@ -2928,7 +2989,7 @@ details[open] > summary { margin-bottom: 10px; }
     const n = findNorm(q);
     if (!n) return null;
     const meK = key(settings().me), pool = side === 'me' ? allianceMates() : Object.values(fullIndex().players).filter((pl) => pl.key !== meK), hits = [];
-    pool.forEach((pl) => { const at = (pl.fnorm || (pl.fnorm = findNorm(pl.name))).indexOf(n); if (at >= 0) hits.push({ pl, at, sf: sfOf(pl.name) }); });
+    pool.forEach((pl) => { const at = (pl.fnorm || (pl.fnorm = findNorm(pl.name) + (nowOf(pl.name) ? '|' + findNorm(nowOf(pl.name)) : ''))).indexOf(n); if (at >= 0) hits.push({ pl, at, sf: sfOf(pl.name) }); });
     // names that start with what was typed first, then players still in the event, then by name
     hits.sort((x, y) => (x.at ? 1 : 0) - (y.at ? 1 : 0) || (x.sf ? 0 : 1) - (y.sf ? 0 : 1) || byName(x.pl.name, y.pl.name));
     return hits;
@@ -2938,7 +2999,7 @@ details[open] > summary { margin-bottom: 10px; }
     if (!hits) return '';
     if (!hits.length) return `<p class="meta">No ${side === 'me' ? 'alliance member' : 'player'} found for “${esc(String(q).trim())}”.</p>`;
     const tag = (h) => (h.sf ? 'group ' + h.sf.g : S.stage ? 'out' : '');
-    return `<div class="quick flow" role="group" aria-label="Search results">${hits.slice(0, 8).map((h) => `<button type="button" class="btn small" data-act="find-${side}" data-name="${esc(h.pl.name)}">${esc(short(h.pl.name))}${tag(h) ? ` <span class="rec">${tag(h)}</span>` : ''}</button>`).join('')}</div>` +
+    return `<div class="quick flow" role="group" aria-label="Search results">${hits.slice(0, 8).map((h) => `<button type="button" class="btn small" data-act="find-${side}" data-name="${esc(h.pl.name)}">${esc(short(h.pl.name))}${nowOf(h.pl.name) ? ` <span class="rec">now ${esc(short(nowOf(h.pl.name)))}</span>` : ''}${tag(h) ? ` <span class="rec">${tag(h)}</span>` : ''}</button>`).join('')}</div>` +
       (hits.length > 8 ? `<p class="meta">${hits.length - 8} more. Keep typing to narrow it down.</p>` : '');
   }
   const findBox = (side) => `<input id="${side}-find" class="find" type="search" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="search" placeholder="${side === 'me' ? 'Search your name' : 'Search any player'}" aria-label="${side === 'me' ? 'Search your name' : 'Search for an opponent'}" value="${esc(FIND[side])}"><div id="${side}-found" class="found">${findHTML(side)}</div>`;
@@ -3331,8 +3392,8 @@ details[open] > summary { margin-bottom: 10px; }
     const m = odMet(A, B);
     if (m) {
       const n = m[0] + m[1];
-      if (m[0] === m[1]) say('They met ' + (n === 2 ? 'twice' : n + ' times') + ' in the qualifier and split them. Somebody learned something. We will see who.');
-      else { const lead = m[0] > m[1] ? A : B; say('They met ' + (n === 1 ? 'once' : n === 2 ? 'twice' : n + ' times') + ' in the qualifier. ' + lead.name + ' leads ' + Math.max(m[0], m[1]) + ' to ' + Math.min(m[0], m[1]) + '. Grudges are good for business.'); }
+      if (m[0] === m[1]) say('They met ' + (n === 2 ? 'twice' : n + ' times') + ' and split them. Somebody learned something. We will see who.');
+      else { const lead = m[0] > m[1] ? A : B; say('They met ' + (n === 1 ? 'once' : n === 2 ? 'twice' : n + ' times') + '. ' + lead.name + ' leads ' + Math.max(m[0], m[1]) + ' to ' + Math.min(m[0], m[1]) + '. Grudges are good for business.'); }
     }
     if (A.al && A.al === B.al) say('Alliance mates. Somebody is buying the drinks after this.');
     if (odHome(A) !== odHome(B)) say('Full disclosure: the Bookie works for ' + HOME_TAG + '. The numbers do not.');
@@ -3353,7 +3414,7 @@ details[open] > summary { margin-bottom: 10px; }
       if (x.w >= 0.75 * (x.w + x.l)) add(odd ? x.nf + ' fights, one squad order, ' + x.w + ' wins. Simple plan. Annoyingly effective.' : 'Same squad order in all ' + x.nf + ' fights, and ' + x.w + ' wins. If it is not broken, do not touch the settings.',
         odd ? 'Has not touched the squad order in ' + x.nf + ' fights and keeps winning. Infuriating.' : 'One squad order, ' + x.nf + ' fights, ' + x.w + ' wins. Either a genius or asleep at the settings screen.');
       else add('Same squad order in all ' + x.nf + ' fights. Knows the plan and sticks to it.',
-        odd ? 'One squad order all qualifier. The opponents have it framed on the wall.' : 'Same squad order ' + x.nf + ' fights running. Opponents send thank-you notes.');
+        odd ? 'One squad order in every fight. The opponents have it framed on the wall.' : 'Same squad order ' + x.nf + ' fights running. Opponents send thank-you notes.');
     }
     if (x.uw >= 2) add('Has won ' + x.uw + ' fights the power said to lose, one while giving away ' + x.bu + '%.', x.uw + ' wins they had no business winning. Luck is a skill too. Allegedly.');
     if (x.ul >= 2) add('', 'Lost ' + x.ul + ' they were meant to win. The power is real. The results are still loading.');
@@ -3362,8 +3423,8 @@ details[open] > summary { margin-bottom: 10px; }
     if (x.pf === 'E') add('An Engineer, giving the War Leaders a head start and fighting anyway.', 'An Engineer. Builds things. Occasionally wins things.');
     if (x.listed >= 220) add('Brings ' + Math.round(x.listed) + 'M. Less a squad, more a weather system.', 'Brings ' + Math.round(x.listed) + 'M. Wins by turning up. Tactics optional.');
     if (x.listed < 150 && x.w >= 15) add('Among the smallest squads in a top 16, with ' + x.w + ' wins. Do not be fooled by the number.', 'Among the smallest squads in a top 16, with ' + x.w + ' wins. Easy to land punches when nobody is watching you.');
-    if (x.streak >= 6 && x.l > 0) add('Won the last ' + x.streak + ' of the qualifier.', 'Won the last ' + x.streak + ' of the qualifier. It will not last. It never does.');
-    if (x.streak <= -3) add('', 'Lost the last ' + (-x.streak) + ' of the qualifier. Due, or doomed.');
+    if (x.streak >= 6 && x.l > 0) add('Won the last ' + x.streak + ' on record.', 'Won the last ' + x.streak + ' on record. It will not last. It never does.');
+    if (x.streak <= -3) add('', 'Lost the last ' + (-x.streak) + ' on record. Due, or doomed.');
     if (!Z.length) Z.push(kind ? 'One of ours. The Bookie will not hear a word against them.' : 'Nothing to report. The Bookie went looking for something interesting in the record and came back with a nap.');
     return { t: Z.slice(0, 2).join(' '), mode: kind ? 'kind' : 'roast' };
   }
@@ -3440,7 +3501,7 @@ details[open] > summary { margin-bottom: 10px; }
     if (!OD.opts) {
       const inn = {}, out = {};
       OD.d.players.forEach((x) => { const o = x.sf ? inn : out, g = x.sf || x.g; (o[g] = o[g] || []).push(x); });
-      const opt = (x) => `<option value="${x.i}">${esc(x.name)}</option>`;
+      const opt = (x) => `<option value="${x.i}">${esc(dn(x.name))}</option>`;
       OD.opts = { inn: Object.keys(inn).sort().map((g) => [g, inn[g].sort((a, b) => a.sfi - b.sfi).map(opt).join('')]),
         out: Object.keys(out).sort().map((g) => `<optgroup label="Out in the qualifier · group ${esc(g)}">${out[g].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })).map(opt).join('')}</optgroup>`).join('') };
     }
@@ -3463,7 +3524,7 @@ details[open] > summary { margin-bottom: 10px; }
   }
   function viewOdds() {
     loadOdds();
-    if (OD.st !== 'ok') return `<div class="od"><div class="od-top"></div><section class="od-card"><p class="od-muted">${OD.st === 'none' ? 'The odds did not load. Reload the page to try again.' : 'Loading the odds…'}</p></section></div>`;
+    if (OD.st !== 'ok' || S.sfState === 'loading' || !S.sfState) return `<div class="od"><div class="od-top"></div><section class="od-card"><p class="od-muted">${OD.st === 'none' ? 'The odds did not load. Reload the page to try again.' : 'Loading the odds…'}</p></section></div>`;
     const d = OD.d, P = d.players;
     if (!OD.set) { OD.set = true; odOpening(); }
     const key = OD.a + '-' + OD.b, cur = document.getElementById('od');
@@ -3477,7 +3538,7 @@ details[open] > summary { margin-bottom: 10px; }
     const stamp = same ? 'No contest' : upset ? 'Upset alert' : stampNames[t];
     const stampLine = same ? 'Pick two different players. The Bookie insists.' : upset && !odHome(D) ? 'Power says ' + D.name + '. The fights say ' + F.name + '.' : stampLines[t];
     const v = OD.shown, bars = odBars(A, B), m = same ? null : odMet(A, B);
-    const metLine = !m ? '' : m[0] === m[1] ? 'Head to head in the qualifier: ' + m[0] + ' each' : 'Head to head in the qualifier: ' + (m[0] > m[1] ? A.name : B.name) + ' leads ' + Math.max(m[0], m[1]) + ' to ' + Math.min(m[0], m[1]);
+    const metLine = !m ? '' : m[0] === m[1] ? 'Head to head so far: ' + m[0] + ' each' : 'Head to head so far: ' + (m[0] > m[1] ? A.name : B.name) + ' leads ' + Math.max(m[0], m[1]) + ' to ' + Math.min(m[0], m[1]);
     const rec = odRec(A, B), game = same ? null : odGame(A, B), recF = q >= 0.5 ? rec : 1 - rec, gameF = game == null ? null : q >= 0.5 ? game : 1 - game;
     const split = game != null && (rec >= 0.5) !== (game >= 0.5) && Math.abs(rec - game) >= 0.1;
     const sure = t === 'lock' && !same, lo = !split && (sure || (A.sd <= 0.015 && B.sd <= 0.015)), hi = split || (!sure && A.sd >= 0.019 && B.sd >= 0.019), pips = lo ? 3 : hi ? 1 : 2;
@@ -3494,7 +3555,7 @@ details[open] > summary { margin-bottom: 10px; }
       <section class="od-card"><div class="od-pick">
         <div><label for="od-a" class="od-lbl"><span class="od-sq" style="background:var(--o-a)" aria-hidden="true"></span>Player one</label><select id="od-a">${odOptions(A.i)}</select></div>
         <div><label for="od-b" class="od-lbl"><span class="od-sq" style="background:var(--o-b)" aria-hidden="true"></span>Player two</label><select id="od-b">${odOptions(B.i, A.sf, A.name)}</select></div>
-      </div>${mates.length ? `<div class="od-grp"><div class="od-lbl">Group ${esc(A.sf)} · can face ${esc(A.name)}</div><div class="od-chips" role="group" aria-label="Players in ${esc(A.name)}’s semi-final group">${mates.map((x) => `<button type="button" class="od-chip${x.i === B.i ? ' on' : ''}" data-act="od-b" data-i="${x.i}"${x.i === B.i ? ' aria-pressed="true"' : ''}>${esc(x.name)}</button>`).join('')}</div></div>` : ''}</section>
+      </div>${mates.length ? `<div class="od-grp"><div class="od-lbl">Group ${esc(A.sf)} · can face ${esc(A.name)}</div><div class="od-chips" role="group" aria-label="Players in ${esc(A.name)}’s semi-final group">${mates.map((x) => `<button type="button" class="od-chip${x.i === B.i ? ' on' : ''}" data-act="od-b" data-i="${x.i}"${x.i === B.i ? ' aria-pressed="true"' : ''}>${esc(nowOf(x.name) || x.name)}${sfMeeting(A.name, x.name) ? ' <span class="od-done">played</span>' : ''}</button>`).join('')}</div></div>` : ''}</section>
       <section class="od-card od-dial">
         <div class="od-lbl">Chance to win the match · best of 3</div>
         <svg aria-hidden="true" width="280" height="156" viewBox="0 0 280 156">
@@ -3521,7 +3582,8 @@ details[open] > summary { margin-bottom: 10px; }
         <div class="od-pips" role="img" aria-label="${esc(sureTitle)}"><span class="on"></span><span${pips >= 2 ? ' class="on"' : ''}></span><span${pips >= 3 ? ' class="on"' : ''}></span></div>
         <p class="od-sure"><b>${esc(sureTitle)}</b> ${esc(sureLine)}</p>
         ${twoLine ? `<p class="od-x" id="od-two">${esc(twoLine)}</p>` : ''}
-        ${!same && A.g !== B.g ? '<p class="od-x">Different qualifier groups: no fights between them on record, so this price leans on builds.</p>' : ''}
+        ${(() => { const sm = same ? null : sfMeeting(A.name, B.name); return sm ? `<p class="od-x" id="od-played">Their semi-final meeting is played: ${esc(sm.wa >= sm.wb ? A.name : B.name)} won ${Math.max(sm.wa, sm.wb)}-${Math.min(sm.wa, sm.wb)} on day ${sm.day}. This price is for a rematch.</p>` : ''; })()}
+        ${!same && A.g !== B.g && !m ? '<p class="od-x">Different qualifier groups: no fights between them on record, so this price leans on builds.</p>' : ''}
       </section>
       ${T ? `<p class="od-foot">Tested on ${Number(T.n).toLocaleString('en-US')} fights it had not seen. When listed power was within 2%, the stronger player on paper won ${T.paper}% of the time and the Bookie’s pick won ${T.pick}%. In-game coins only.</p>` : ''}
     </div>`;
@@ -3749,7 +3811,7 @@ details[open] > summary { margin-bottom: 10px; }
   function snapshotState() { const o = {}; HOT_KEYS.forEach((k) => { o[k] = S[k]; }); return JSON.parse(JSON.stringify(o)); }
   function start(hot) {
     if (hot && typeof hot === 'object') HOT_KEYS.forEach((k) => { if (k in hot && k !== 'view') S[k] = hot[k]; });
-    fromHash(); draw(); initStore(); loadBundle(); loadStage();
+    fromHash(); draw(); initStore(); loadBundle(); loadStage(); loadSF();
   }
   const hot = window.claude && window.claude.hot;
   try { if (hot && typeof hot.snapshot === 'function') hot.snapshot(snapshotState); } catch (e) { /* ignore */ }
