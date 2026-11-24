@@ -1685,7 +1685,7 @@ details[open] > summary { margin-bottom: 10px; }
   const demo = () => DEMO || (DEMO = E.exampleData(2026));
   // Fights come from two places: battle reports shipped with the page (data/reports.json) and fights logged in the shared database.
   const allBattles = () => (S.bundle.length ? S.bundle.concat(S.sfF, S.battles) : S.battles);      // sfF: the semi-final fights (data/sf.json), rounds 33+
-  const isDemo = () => !S.battles.length && !S.bundle.length && !S.personal.myForm && !S.forceReal && S.bundleState !== 'loading';
+  const isDemo = () => !S.battles.length && !S.bundle.length && !S.personal.myForm && !S.forceReal && S.bundleState !== 'loading' && S.bundleState !== 'failed';
   const battles = () => (isDemo() ? demo().battles : allBattles());
   function baseSettings() {
     // On a public website each visitor starts by picking their own name.
@@ -2042,6 +2042,43 @@ details[open] > summary { margin-bottom: 10px; }
     }
   }
 
+  /* ---------- the website's data files ---------- */
+  // A dropped connection, a server error or a cut-off file is tried again (after 0.7, 2.8 and 6.3 seconds); a file that is
+  // not there at all (404) is not. Inside claude.ai (window.claude) nothing is retried and nothing counts as failed: the
+  // page has no data files there and falls back as it always did.
+  const LOAD_FAILED = new Set();        // files that did not arrive after the retries: 'reports', 'sf', 'stage', 'race', 'odds'
+  async function getJSON(url, tries) {
+    let last = null;
+    for (let i = 0; i < tries; i++) {
+      if (i) await new Promise((res) => setTimeout(res, 700 * i * i));
+      try {
+        const r = await fetch(url, { cache: 'no-cache' });
+        if (r.status === 404) return { missing: true };
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return { data: await r.json() };
+      } catch (e) { last = e; }
+    }
+    return { error: last || new Error('no answer') };
+  }
+  // What the fetch chains used to resolve to: the parsed file, or null. Never rejects.
+  function getData(name, url) {
+    const site = !window.claude;
+    return getJSON(url, site ? 4 : 1).then((got) => { if (got.error && site) LOAD_FAILED.add(name); else LOAD_FAILED.delete(name); return got.data || null; });
+  }
+  // "Try again" (and the browser coming back online): fetch once more whatever did not arrive.
+  function reloadData() {
+    const f = Array.from(LOAD_FAILED);
+    if (!f.length) return;
+    LOAD_FAILED.clear();
+    if (f.indexOf('reports') >= 0) { S.bundleState = 'loading'; loadBundle(); }
+    if (f.indexOf('stage') >= 0) { S.stageState = ''; loadStage(); }
+    if (f.indexOf('sf') >= 0) { S.sfState = ''; loadSF(); }
+    if (f.indexOf('race') >= 0) { S.raceState = ''; loadRace(); }
+    if (f.indexOf('odds') >= 0) OD.st = '';       // the Odds tab asks for its file when it is drawn
+    render();
+  }
+  const LOAD_FAIL_HTML = '<div class="empty" id="load-fail"><p><b>The fights didn’t load.</b> The connection dropped or the server didn’t answer.</p><p style="margin-top:14px"><button type="button" class="btn" data-act="reload-data">Try again</button></p></div>';
+
   /* ---------- storage ---------- */
   function loadLocal() {
     try {
@@ -2180,7 +2217,7 @@ details[open] > summary { margin-bottom: 10px; }
     S.lastDemo = demoNow;
     drawChrome();
     let html;
-    try { html = S.bundleState === 'loading' && !S.battles.length && S.view !== 'odds' ? '<div class="empty">Loading fights…</div>' : VIEW[S.view](); }
+    try { html = S.bundleState === 'failed' && S.view !== 'odds' ? LOAD_FAIL_HTML : S.bundleState === 'loading' && !S.battles.length && S.view !== 'odds' ? '<div class="empty">Loading fights…</div>' : VIEW[S.view](); }
     catch (e) { console.error(e); html = `<div class="empty">This view hit a problem: ${esc(e.message)}</div>`; }
     if (html !== OD_KEEP) document.getElementById('view').innerHTML = html;
     if (fid) {
@@ -2201,6 +2238,7 @@ details[open] > summary { margin-bottom: 10px; }
       if (a.dataset.view === S.view) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
     });
     let notes = '';
+    if (LOAD_FAILED.size && (S.bundleState !== 'failed' || S.view === 'odds')) notes += '<div class="note err" id="load-part"><p><b>Part of the data didn’t load.</b> The connection dropped or the server didn’t answer, so some of this page is missing or out of date.</p><button class="btn small" data-act="reload-data">Try again</button></div>';
     if (isDemo()) notes += '<div class="note"><p><b>Example data.</b> These fights are made up so you can see how the tracker works. Log your own battle reports, or send them to Claude to import, and this goes away.</p><button class="btn small" data-act="real">Use my own data</button></div>';
     const lr = isDemo() ? 0 : lastRound();
     if (lr) {
@@ -2922,8 +2960,7 @@ details[open] > summary { margin-bottom: 10px; }
   function loadSF() {
     if (S.sfState) return;
     S.sfState = 'loading';
-    fetch('data/sf.json', { cache: 'no-cache' })
-      .then((r) => (r.ok ? r.json() : null))
+    getData('sf', 'data/sf.json')
       .then((d) => {
         if (d && Array.isArray(d.fights)) { S.sf = d; S.sfF = d.fights.filter((b) => b && b.a && b.b); S.sfState = 'ok'; SFM = null; try { OD.opts = null; } catch (e) { /* odds not built yet */ } bump(); }
         else S.sfState = 'none';
@@ -2965,8 +3002,7 @@ details[open] > summary { margin-bottom: 10px; }
   function loadStage() {
     if (S.stageState) return;
     S.stageState = 'loading';
-    fetch('data/stage.json', { cache: 'no-cache' })
-      .then((r) => (r.ok ? r.json() : null))
+    getData('stage', 'data/stage.json')
       .then((d) => { S.stage = d && d.groups ? d : null; S.stageState = S.stage ? 'ok' : 'none'; SFIX = null; render(); })
       .catch(() => { S.stageState = 'none'; render(); });
   }
@@ -3010,8 +3046,7 @@ details[open] > summary { margin-bottom: 10px; }
   function loadRace() {
     if (S.raceState) return;
     S.raceState = 'loading';
-    fetch('data/race.json', { cache: 'no-cache' })
-      .then((r) => (r.ok ? r.json() : null))
+    getData('race', 'data/race.json')
       .then((d) => { S.race = d && d.groups ? d : null; S.raceState = S.race ? 'ok' : 'none'; RACEIX = null; render(); })
       .catch(() => { S.raceState = 'none'; render(); });
   }
@@ -3240,8 +3275,7 @@ details[open] > summary { margin-bottom: 10px; }
       l.id = 'od-fonts'; l.rel = 'stylesheet'; l.href = 'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap';
       document.head.appendChild(l);
     }
-    fetch('data/odds.json', { cache: 'no-cache' })
-      .then((r) => (r.ok ? r.json() : null))
+    getData('odds', 'data/odds.json')
       .then((d) => { if (d && d.P && d.M && d.M.length === 201) { odPrep(d); OD.st = 'ok'; } else OD.st = 'none'; render(); })
       .catch(() => { OD.st = 'none'; render(); });
   }
@@ -3677,6 +3711,7 @@ details[open] > summary { margin-bottom: 10px; }
     if (!el) return;
     const a = el.dataset.act;
     if (a === 'od-more') { odMore(); return; }
+    if (a === 'reload-data') { reloadData(); return; }
     if (a === 'od-b') { odPick('b', +el.dataset.i); return; }
     if (a === 'find-me' || a === 'find-opp') { findPick(a === 'find-me' ? 'me' : 'opp', el.dataset.name); return; }
     if (a === 'real') { S.forceReal = true; location.hash = '#next'; render(); }
@@ -3802,13 +3837,11 @@ details[open] > summary { margin-bottom: 10px; }
       let arr;
       if (inline) arr = JSON.parse(inline.textContent);
       else {
-        const r = await fetch('data/reports.json', { cache: 'no-cache' });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        arr = await r.json();
+        arr = await getData('reports', 'data/reports.json');
       }
       S.bundle = Array.isArray(arr) ? arr.filter((b) => b && b.a && b.b) : [];
-      S.bundleState = S.bundle.length ? 'ok' : 'none';
-    } catch (e) { S.bundle = []; S.bundleState = 'none'; }
+      S.bundleState = S.bundle.length ? 'ok' : LOAD_FAILED.has('reports') ? 'failed' : 'none';
+    } catch (e) { S.bundle = []; S.bundleState = LOAD_FAILED.has('reports') ? 'failed' : 'none'; }
     bump(); render();
     loadRace();
   }
@@ -3821,6 +3854,7 @@ details[open] > summary { margin-bottom: 10px; }
   })();
   function fromHash() { const h = (location.hash || '').slice(1); S.view = VIEWS.indexOf(h) >= 0 ? h : 'next'; }
   window.addEventListener('hashchange', () => { fromHash(); if (S.view === 'odds') OD.fresh = true; render(); });
+  window.addEventListener('online', reloadData);
   const HOT_KEYS = ['view', 'opp', 'oppForm', 'oppEdited', 'oppResult', 'oppManual', 'oppOpen', 'shownPerm', 'sel', 'forceReal'];
   function snapshotState() { const o = {}; HOT_KEYS.forEach((k) => { o[k] = S[k]; }); return JSON.parse(JSON.stringify(o)); }
   function start(hot) {
