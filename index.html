@@ -3482,7 +3482,7 @@ details[open] > summary { margin-bottom: 10px; }
   function odPick(side, i) {
     if (!OD.d || !(i >= 0) || !OD.d.players[i]) return;
     const from = OD.shown;
-    if (side === 'a') OD.a = i; else OD.b = i;
+    if (side === 'a') { OD.a = i; odFollow(); } else OD.b = i;
     OD.joke = 0;
     odGo(from);
     render();
@@ -3512,13 +3512,27 @@ details[open] > summary { margin-bottom: 10px; }
   }
   // The players who share player one's semi-final group: the only ones he can meet in this stage.
   function odMates(A) { return A.sf ? OD.d.players.filter((x) => x.sf === A.sf && x.i !== A.i).sort((a, b) => a.sfi - b.sfi) : []; }
-  // Opening match: the visitor's own semi-final group and the opponent the model has closest; without one, ROaR's closest match of the stage.
+  // Of those, the one the model has closest to A; the ones A has not met yet in this stage come first.
+  function odNear(A) {
+    const mates = odMates(A), open = mates.filter((x) => !sfMeeting(A.name, x.name));
+    let B = null;
+    (open.length ? open : mates).forEach((x) => { if (!B || Math.abs(odRec(A, x) - 0.5) < Math.abs(odRec(A, B) - 0.5)) B = x; });
+    return B;
+  }
+  // Player two follows player one's semi-final group: a new player one from another group moves player two into it, and so
+  // does picking the current player two as player one. Player two stays when he is already in that group (and is someone
+  // else), and when player one is out of the stage.
+  function odFollow() {
+    const P = OD.d.players, A = P[OD.a], B = P[OD.b];
+    if (!A || !A.sf || (B && B.sf === A.sf && B.i !== A.i)) return;
+    const N = odNear(A);
+    if (N) OD.b = N.i;
+  }
+  // Opening match: the visitor's own semi-final group and the opponent not met yet that the model has closest; without one, ROaR's closest match still to play.
   function odOpening() {
     const d = OD.d, P = d.players, me = P[d.byName[settings().me]];
     let A = me && me.sf ? me : P[d.byName['ᐧSkyeᐧ']], B = null;
-    if (A && A.sf) {
-      P.forEach((x) => { if (x.sf === A.sf && x.i !== A.i && (!B || Math.abs(odRec(A, x) - 0.5) < Math.abs(odRec(A, B) - 0.5))) B = x; });
-    }
+    if (A && A.sf) B = odNear(A);
     if (!A || !B) { A = P[0]; B = P[1] || P[0]; }
     OD.a = A.i; OD.b = B.i; OD.joke = 0;
   }
